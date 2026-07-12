@@ -1,0 +1,270 @@
+<!doctype html><html><head><meta charset="utf-8">
+<style>
+:root{--text-primary:#ececf0;--text-secondary:#b7b8c4;--text-muted:#7f808b;}
+html,body{margin:0;padding:0;background:#0a0a0f;}
+body{background:radial-gradient(120% 100% at 50% -5%, #211d3a 0%, #131019 46%, #09090e 100%);}
+.framebg{padding:56px 56px 44px;display:flex;justify-content:center;}
+.framewrap{width:1000px;}
+</style></head><body>
+<div class="framebg"><div class="framewrap">
+<div class="nh">
+<h2 class="sr-only">notchide macOS mockup: the MacBook notch shows three agent status dots, and unfurls downward into a glassy review console approving a Bash command with a live git diff.</h2>
+<style>
+.nh{ --ink:#eaeaf1; --ink2:#a6a7b2; --ink3:#6f707b; --ink4:#54555f;
+  --hair:rgba(255,255,255,0.10); --hair2:rgba(255,255,255,0.055);
+  --ptop:#1d1f27; --code:#0d0e13;
+  --teal:#34d6ac; --amber:#f5b13a;
+  --add:#54cf95; --addbg:rgba(84,207,149,0.10);
+  --rem:#f2807a; --rembg:rgba(242,128,122,0.10);
+  --kw:#c9a2ff; --ty:#69d6e6; --st:#e3bd7c; --fn:#7fe0c0;
+  --font-sans:-apple-system,"SF Pro Text",ui-sans-serif,system-ui,sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Monaco,monospace;
+  font-family:var(--font-sans); width:100%; }
+.nh *{box-sizing:border-box}
+.nh .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+.nh-screen{position:relative;max-width:1000px;margin:0 auto;border-radius:20px;overflow:hidden;
+  background:radial-gradient(130% 90% at 50% -12%,#242043 0%,#16151f 42%,#0c0c12 100%);
+  box-shadow:0 30px 80px -30px rgba(0,0,0,0.65),0 2px 0 rgba(255,255,255,0.04) inset,0 0 0 1px rgba(255,255,255,0.05);}
+.nh-menubar{position:relative;z-index:5;height:34px;display:flex;align-items:center;justify-content:space-between;
+  padding:0 16px;font-size:13px;color:rgba(233,233,243,0.82);
+  background:linear-gradient(180deg,rgba(18,18,26,0.55),rgba(18,18,26,0.12));
+  -webkit-backdrop-filter:blur(9px);backdrop-filter:blur(9px);border-bottom:1px solid rgba(255,255,255,0.04)}
+.nh-ml,.nh-mr{display:flex;align-items:center;gap:17px;white-space:nowrap}
+.nh-ml .brand{font-weight:500;color:#f3f3f8}
+.nh-ml i,.nh-mr i{font-size:15px;opacity:.9;line-height:1}
+.nh-mr{gap:14px;color:rgba(233,233,243,0.72)}
+.nh-mr .clock{color:#f0f0f6;font-variant-numeric:tabular-nums}
+.nh-hidesm{display:inline}
+
+.nh-ghost{position:absolute;z-index:1;left:34px;top:64px;width:300px;opacity:.14;filter:blur(0.4px);pointer-events:none;
+  border-radius:10px;border:1px solid rgba(255,255,255,0.25);overflow:hidden}
+.nh-ghost .bar{display:flex;align-items:center;gap:6px;padding:7px 9px;background:rgba(255,255,255,0.06)}
+.nh-ghost .dot{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,0.5)}
+.nh-ghost .url{margin-left:8px;height:14px;flex:1;border-radius:7px;background:rgba(255,255,255,0.14)}
+.nh-ghost .body{height:120px;background:repeating-linear-gradient(180deg,rgba(255,255,255,0.05) 0 12px,transparent 12px 34px)}
+
+.nh-notch{position:absolute;z-index:6;top:0;left:50%;transform:translateX(-50%);width:420px;height:74px;filter:drop-shadow(0 6px 14px rgba(90,120,255,0.16))}
+.nh-glow{position:absolute;z-index:6;top:52px;left:50%;transform:translateX(-50%);width:220px;height:22px;pointer-events:none;
+  background:radial-gradient(ellipse at center,rgba(110,150,255,0.5),rgba(120,120,255,0) 70%);filter:blur(7px);opacity:.7}
+
+.nh-dots{position:absolute;z-index:7;top:13px;left:calc(50% + 112px);display:flex;align-items:center;gap:11px}
+.nh-dot{width:8px;height:8px;border-radius:50%;position:relative}
+.nh-dot.teal{background:var(--teal);box-shadow:0 0 7px rgba(52,214,172,0.55)}
+.nh-dot.amber{background:var(--amber);box-shadow:0 0 8px rgba(245,177,58,0.6)}
+.nh-dot.amber::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid var(--amber);
+  animation:nh-pulse 1.9s ease-out infinite}
+@keyframes nh-pulse{0%{transform:scale(0.7);opacity:.9}70%{transform:scale(2.1);opacity:0}100%{opacity:0}}
+
+.nh-panelwrap{position:relative;z-index:4;width:min(848px,93%);margin:10px auto 30px}
+.nh-panel{position:relative;border-radius:16px;padding:46px 22px 18px;
+  background:linear-gradient(180deg,var(--ptop) 0,var(--ptop) 42px,#191a21 130px,#141419 100%);
+  border:1px solid var(--hair2);border-top:none;
+  box-shadow:0 34px 70px -34px rgba(0,0,0,0.7),0 1px 0 rgba(255,255,255,0.04) inset}
+
+.nh-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.nh-lead{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--amber);font-weight:500}
+.nh-lead i{font-size:15px}
+.nh-chips{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-left:auto}
+.nh-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#c7c8d2;
+  background:rgba(255,255,255,0.05);border:1px solid var(--hair2);border-radius:7px;padding:3px 8px;white-space:nowrap}
+.nh-chip i{font-size:13px;opacity:.85}
+.nh-chip .d{width:6px;height:6px;border-radius:50%;background:var(--amber);box-shadow:0 0 5px rgba(245,177,58,0.7)}
+.nh-chip.mono{font-family:var(--font-mono)}
+
+.nh-cmdlabel{font-size:12px;color:var(--ink3);margin:14px 0 7px}
+.nh-cmd{position:relative;display:flex;align-items:center;gap:11px;font-family:var(--font-mono);
+  background:linear-gradient(180deg,#111218,#0d0e13);border:1px solid rgba(242,128,122,0.28);
+  border-radius:11px;padding:13px 15px 13px 16px;overflow-x:auto}
+.nh-cmd::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:11px 0 0 11px;
+  background:linear-gradient(180deg,#f2807a,#e05a54)}
+.nh-cmd .pr{color:var(--ink4)}
+.nh-cmd .t{font-size:16px;font-weight:500;color:#ececf2;white-space:nowrap;letter-spacing:.2px}
+.nh-cmd .t .dg{color:#ff8a83}
+.nh-cmd .tag{margin-left:auto;display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#f2b0ac;
+  background:rgba(242,128,122,0.12);border:1px solid rgba(242,128,122,0.3);border-radius:6px;padding:3px 8px;white-space:nowrap}
+.nh-cmd .tag i{font-size:13px}
+
+.nh-actions{display:flex;align-items:center;gap:9px;margin-top:13px;flex-wrap:wrap}
+.nh-btn{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:500;border-radius:9px;
+  padding:9px 16px;cursor:pointer;border:1px solid transparent;line-height:1}
+.nh-btn i{font-size:16px}
+.nh-deny{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.16);color:#eef0f5}
+.nh-approve{color:#07141b;background:linear-gradient(120deg,#37d9c1,#7b78ff);
+  box-shadow:0 6px 18px -6px rgba(90,130,255,0.6),0 0 0 1px rgba(255,255,255,0.14) inset}
+.nh-remember{background:transparent;color:var(--ink2);border-color:transparent;padding:9px 10px}
+.nh-remember:hover{color:#d6d7df}
+.nh-spacer{margin-left:auto}
+
+.nh-redirect{display:flex;align-items:center;gap:10px;margin-top:11px;
+  background:#0d0e13;border:1px solid var(--hair);border-radius:9px;padding:9px 13px}
+.nh-redirect .lbl{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink3);white-space:nowrap}
+.nh-redirect .lbl i{font-size:15px}
+.nh-redirect .txt{font-family:var(--font-mono);font-size:13px;color:#d5d6de}
+.nh-caret{display:inline-block;width:1.5px;height:15px;background:#8ea2ff;vertical-align:-3px;margin-left:1px;animation:nh-blink 1.05s steps(1) infinite}
+@keyframes nh-blink{0%,50%{opacity:1}50.01%,100%{opacity:0}}
+.nh-redirect .send{margin-left:auto;color:var(--ink3);font-size:16px;display:flex}
+
+.nh-div{height:1px;background:var(--hair2);margin:16px 0}
+
+.nh-files{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.nh-file{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:#c9cad4;
+  background:rgba(255,255,255,0.045);border:1px solid var(--hair2);border-radius:7px;padding:4px 10px;font-family:var(--font-mono)}
+.nh-file.active{border-color:rgba(123,120,255,0.4);background:rgba(123,120,255,0.10);color:#e7e7ef}
+.nh-file i{font-size:14px;opacity:.8;color:var(--ink2)}
+.nh-file .pl{color:var(--add)} .nh-file .mn{color:var(--rem)}
+.nh-sech{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink3);margin:0 0 9px}
+.nh-sech i{font-size:14px}
+
+.nh-diff{background:var(--code);border:1px solid var(--hair2);border-radius:11px;overflow-x:auto;padding:8px 0}
+.nh-diff .hunk{font-family:var(--font-mono);font-size:12px;color:#6fd0c2;padding:2px 14px 6px;white-space:nowrap;opacity:.85}
+.nh-drow{display:flex;align-items:stretch;font-family:var(--font-mono);font-size:12.5px;line-height:20px;white-space:pre;min-width:max-content}
+.nh-ln{flex:0 0 34px;text-align:right;padding-right:8px;color:var(--ink4);user-select:none}
+.nh-sg{flex:0 0 16px;text-align:center;color:var(--ink4);user-select:none}
+.nh-cc{padding-right:18px;color:#cbccd6}
+.nh-add{background:var(--addbg)} .nh-add .nh-sg{color:var(--add)}
+.nh-rem{background:var(--rembg)} .nh-rem .nh-sg{color:var(--rem)}
+.nh-cc .k{color:var(--kw)} .nh-cc .t{color:var(--ty)} .nh-cc .s{color:var(--st)} .nh-cc .f{color:var(--fn)}
+
+.nh-term{font-family:var(--font-mono);font-size:12.5px;line-height:21px;background:rgba(0,0,0,0.22);
+  border:1px solid var(--hair2);border-radius:11px;padding:11px 14px}
+.nh-term .l{white-space:pre;color:var(--ink3)}
+.nh-term .pr{color:#5fd6b8} .nh-term .ok{color:var(--add)} .nh-term .dim{color:var(--ink4)}
+
+.nh-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px}
+.nh-jump{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink2);
+  background:rgba(255,255,255,0.045);border:1px solid var(--hair2);border-radius:8px;padding:7px 12px;cursor:pointer}
+.nh-jump i{font-size:15px}
+.nh-jump:hover{color:#dcdde4;border-color:var(--hair)}
+.nh-reason{display:inline-flex;align-items:center;gap:6px;margin-left:auto;font-size:11px;color:var(--ink4)}
+.nh-reason i{font-size:13px}
+.nh-reason b{font-weight:500;color:var(--ink3)}
+
+.nh-cap{max-width:1000px;margin:14px auto 0;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary)}
+.nh-cap .wm{font-weight:500;color:var(--text-primary);letter-spacing:.2px}
+.nh-cap .sq{width:7px;height:7px;border-radius:2px;background:linear-gradient(120deg,#37d9c1,#7b78ff)}
+.nh-cap .tg{color:var(--text-muted)}
+
+@media (max-width:640px){ .nh-hidesm{display:none} .nh-panel{padding:44px 15px 16px} }
+@media (max-width:600px){
+  .nh-ml .brand{display:none}
+  .nh-mr i{display:none}
+  .nh-mr .clock{display:none}
+  .nh-dots{left:calc(50% + 100px);gap:9px}
+  .nh-ghost{display:none}
+}
+</style>
+
+<div class="nh-screen">
+  <div class="nh-ghost" aria-hidden="true">
+    <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url"></span></div>
+    <div class="body"></div>
+  </div>
+
+  <div class="nh-menubar">
+    <div class="nh-ml">
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor" width="15" height="15" style="display:inline-block;vertical-align:-0.15em;opacity:.9"><path d="M17.6 13.5c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.15-2.8.85-3.5.85-.7 0-1.85-.83-3-.8-1.55.02-2.98.9-3.77 2.29-1.6 2.79-.41 6.92 1.15 9.19.76 1.11 1.67 2.35 2.86 2.31 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.13 2.76-2.24.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.42-3.65z"/><path d="M14.9 6.5c.64-.78 1.07-1.86.95-2.94-.92.04-2.03.61-2.69 1.39-.59.69-1.11 1.79-.97 2.85 1.02.08 2.07-.52 2.71-1.3z"/></svg>
+      <span class="brand">notchide</span>
+      <span class="nh-hidesm">File</span><span class="nh-hidesm">Edit</span><span class="nh-hidesm">View</span>
+    </div>
+    <div class="nh-mr">
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" style="display:inline-block;vertical-align:-0.15em;opacity:.9"><rect x="2" y="8" width="15" height="8" rx="2"/><path d="M19 10.5v3"/><rect x="4.3" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="7.6" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="10.9" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/></svg>
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" style="display:inline-block;vertical-align:-0.15em;opacity:.9"><path d="M12 18h.01"/><path d="M9.17 15.17a4 4 0 0 1 5.66 0"/><path d="M6.34 12.34a8 8 0 0 1 11.32 0"/><path d="M3.51 9.51c4.69-4.68 12.29-4.68 17 0"/></svg>
+      <svg class="nh-hidesm" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" style="vertical-align:-0.15em;opacity:.9"><circle cx="10" cy="10" r="6.5"/><path d="M20 20l-4.5-4.5"/></svg>
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" style="display:inline-block;vertical-align:-0.15em;opacity:.9"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></svg>
+      <span class="clock">9:41</span>
+    </div>
+  </div>
+
+  <svg class="nh-notch" viewBox="0 0 420 74" aria-hidden="true">
+    <path d="M0,74 L0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44 L420,74 Z" fill="#1d1f27"/>
+    <path d="M0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44" fill="none" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+    <path d="M115,0 L305,0 L305,48 Q305,64 289,64 L131,64 Q115,64 115,48 Z" fill="#050608" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+  </svg>
+  <div class="nh-glow" aria-hidden="true"></div>
+
+  <div class="nh-dots" aria-hidden="true">
+    <span class="nh-dot teal"></span>
+    <span class="nh-dot amber"></span>
+    <span class="nh-dot teal"></span>
+  </div>
+
+  <div class="nh-panelwrap">
+    <div class="nh-panel">
+
+      <div class="nh-row">
+        <span class="nh-lead"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" style="display:inline-block;vertical-align:-0.15em"><path d="M12 3l7 2.5v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9v-5z"/><circle cx="12" cy="11" r="1.4"/><path d="M12 12.4v2.2"/></svg>permission requested</span>
+        <span class="nh-chips">
+          <span class="nh-chip"><span class="d"></span>agent #2</span>
+          <span class="nh-chip"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="13" height="13" style="display:inline-block;vertical-align:-0.15em;opacity:.85"><circle cx="7" cy="18" r="2"/><circle cx="7" cy="6" r="2"/><circle cx="17" cy="6" r="2"/><path d="M7 8v8"/><path d="M9 18h6a2 2 0 0 0 2-2V8"/></svg>feat/payments</span>
+          <span class="nh-chip mono"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="13" height="13" style="display:inline-block;vertical-align:-0.15em;opacity:.85"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9l3 3l-3 3"/><path d="M13 15h4"/></svg>Bash</span>
+        </span>
+      </div>
+
+      <div class="nh-cmdlabel">wants to run</div>
+      <div class="nh-cmd">
+        <span class="pr">$</span>
+        <span class="t"><span class="dg">rm -rf</span> build/</span>
+        <span class="tag"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="13" height="13" style="display:inline-block;vertical-align:-0.15em"><path d="M12 4.5L21 19.5H3z"/><path d="M12 10v4"/><path d="M12 17h.01"/></svg>destructive · 128 files</span>
+      </div>
+
+      <div class="nh-actions">
+        <button class="nh-btn nh-deny"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="display:inline-block;vertical-align:-0.15em"><path d="M18 6L6 18M6 6l12 12"/></svg>Deny</button>
+        <button class="nh-btn nh-approve"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="display:inline-block;vertical-align:-0.15em"><path d="M5 12l5 5L20 7"/></svg>Approve</button>
+        <button class="nh-btn nh-remember"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="display:inline-block;vertical-align:-0.15em"><path d="M9.83 9.17a4 4 0 1 0 0 5.66a10 10 0 0 0 2.17-2.83a10 10 0 0 1 2.17-2.83a4 4 0 1 1 0 5.66a10 10 0 0 1-2.17-2.83a10 10 0 0 0-2.17-2.83"/></svg>Approve &amp; remember</button>
+      </div>
+
+      <div class="nh-redirect">
+        <span class="lbl"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" style="display:inline-block;vertical-align:-0.15em"><path d="M9 13l-4-4 4-4"/><path d="M5 9h10a4 4 0 0 1 0 8h-1"/></svg>redirect</span>
+        <span class="txt">actually target dist/ instead<span class="nh-caret"></span></span>
+        <span class="send"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="display:inline-block;vertical-align:-0.15em"><path d="M12 19V6"/><path d="M6 12l6-6 6 6"/></svg></span>
+      </div>
+
+      <div class="nh-div"></div>
+
+      <div class="nh-sech"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="display:inline-block;vertical-align:-0.15em"><circle cx="12" cy="12" r="3.2"/><path d="M3 12h5.8"/><path d="M15.2 12H21"/></svg>just edited</div>
+      <div class="nh-files">
+        <span class="nh-file active"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="display:inline-block;vertical-align:-0.15em;opacity:.8;color:var(--ink2)"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M10 13l-2 2 2 2"/><path d="M14 13l2 2-2 2"/></svg>PaymentService.swift · <span class="pl">+18</span> <span class="mn">−4</span></span>
+        <span class="nh-file"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="display:inline-block;vertical-align:-0.15em;opacity:.8;color:var(--ink2)"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M10 13l-2 2 2 2"/><path d="M14 13l2 2-2 2"/></svg>Config.swift · <span class="pl">+2</span> <span class="mn">−0</span></span>
+      </div>
+
+      <div class="nh-diff">
+        <div class="hunk">@@ -12,7 +12,9 @@ PaymentService · charge(_:to:)</div>
+        <div class="nh-drow"><span class="nh-ln">12</span><span class="nh-sg"> </span><code class="nh-cc"><span class="k">func</span> <span class="f">charge</span>(_ amount: <span class="t">Decimal</span>, to card: <span class="t">Card</span>) <span class="k">async</span> <span class="k">throws</span> -&gt; <span class="t">Receipt</span> {</code></div>
+        <div class="nh-drow"><span class="nh-ln">13</span><span class="nh-sg"> </span><code class="nh-cc">    <span class="k">guard</span> amount &gt; 0 <span class="k">else</span> { <span class="k">throw</span> <span class="t">PaymentError</span>.invalidAmount }</code></div>
+        <div class="nh-drow nh-rem"><span class="nh-ln">14</span><span class="nh-sg">−</span><code class="nh-cc">    <span class="k">let</span> cents = <span class="t">Int</span>(amount * 100)</code></div>
+        <div class="nh-drow nh-add"><span class="nh-ln">14</span><span class="nh-sg">+</span><code class="nh-cc">    <span class="k">let</span> cents = <span class="t">NSDecimalNumber</span>(decimal: amount * 100).<span class="f">intValue</span></code></div>
+        <div class="nh-drow"><span class="nh-ln">15</span><span class="nh-sg"> </span><code class="nh-cc">    <span class="k">let</span> key = card.customerID + <span class="s">"-"</span> + reference</code></div>
+        <div class="nh-drow nh-add"><span class="nh-ln">16</span><span class="nh-sg">+</span><code class="nh-cc">    <span class="k">try</span> <span class="k">await</span> rateLimiter.<span class="f">acquire</span>(for: card.customerID)</code></div>
+        <div class="nh-drow"><span class="nh-ln">17</span><span class="nh-sg"> </span><code class="nh-cc">    <span class="k">let</span> intent = <span class="k">try</span> <span class="k">await</span> gateway.<span class="f">createIntent</span>(cents, key: key)</code></div>
+        <div class="nh-drow nh-rem"><span class="nh-ln">18</span><span class="nh-sg">−</span><code class="nh-cc">    <span class="k">return</span> intent</code></div>
+        <div class="nh-drow nh-add"><span class="nh-ln">18</span><span class="nh-sg">+</span><code class="nh-cc">    <span class="k">return</span> <span class="k">try</span> <span class="k">await</span> gateway.<span class="f">confirm</span>(intent)</code></div>
+        <div class="nh-drow"><span class="nh-ln">19</span><span class="nh-sg"> </span><code class="nh-cc">}</code></div>
+      </div>
+
+      <div class="nh-div"></div>
+
+      <div class="nh-sech"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="display:inline-block;vertical-align:-0.15em"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9l3 3l-3 3"/><path d="M13 15h4"/></svg>output</div>
+      <div class="nh-term">
+        <div class="l"><span class="pr">›</span> swift build   <span class="dim">— compiling PaymentService.swift (2 of 7)</span></div>
+        <div class="l"><span class="pr">›</span> swift test --filter PaymentTests</div>
+        <div class="l"><span class="ok">✓</span> 42 passed · 0 failed   <span class="dim">1.8s</span></div>
+        <div class="l"><span class="dim">building release…</span></div>
+      </div>
+
+      <div class="nh-foot">
+        <button class="nh-jump"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" style="display:inline-block;vertical-align:-0.15em"><path d="M16 4h4v4"/><path d="M20 4l-6 6"/><path d="M8 20H4v-4"/><path d="M4 20l6-6"/></svg>Jump to terminal</button>
+        <span class="nh-reason"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="13" height="13" style="display:inline-block;vertical-align:-0.15em"><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"/><path d="M16.7 16.7A9.8 9.8 0 0 1 12 18c-3.6 0-6.6-2-9-6 1.3-2.1 2.7-3.7 4.3-4.7m2.9-1.1A9 9 0 0 1 12 6c3.6 0 6.6 2 9 6-.7 1.1-1.4 2.1-2.1 2.9"/><path d="M3 3l18 18"/></svg><b>why did this tap?</b> · terminal not visible</span>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="nh-cap">
+  <span class="sq" aria-hidden="true"></span>
+  <span class="wm">notchide</span>
+  <span class="tg">— approve your agents from the notch</span>
+</div>
+</div>
+
+</div></div></body></html>

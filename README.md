@@ -9,6 +9,12 @@
 [![Swift 6](https://img.shields.io/badge/Swift-6-black.svg)](https://swift.org)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-black.svg)](#compatibility)
 
+<br/>
+
+<img src="docs/media/hero.png" alt="notchide: the MacBook notch unfurled into a review console — a pending 'rm -rf build/' with Approve/Deny/redirect, a live syntax-highlighted git diff, and 'why did this tap? · terminal not visible'" width="860">
+
+<sub>Concept render. The notch tracks three agents (one needs you); it unfurls into a read-only approve panel over your fullscreen work — focus never leaves the app you're in.</sub>
+
 </div>
 
 ---
