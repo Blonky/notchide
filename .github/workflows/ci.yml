@@ -19,9 +19,8 @@ jobs:
         uses: actions/checkout@v4
 
       # The root SwiftPM package (NotchideKit + notchide-hook) has ZERO external
-      # dependencies, so it builds and tests fully offline on the CI runner.
-      # The GUI lives in the nested app/ package and depends on DynamicNotchKit;
-      # it is built on the developer's Mac, not here.
+      # dependencies, so it builds and tests fully offline. The GUI app/ package
+      # (which depends on DynamicNotchKit) is verified by the build-app job below.
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app
 
@@ -33,3 +32,19 @@ jobs:
 
       - name: Test
         run: swift test -v
+
+  build-app:
+    name: Build (GUI app package)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # macos-latest ships full Xcode, so DynamicNotchKit's SwiftUI @Entry /
+      # #Preview macros resolve here (they do NOT under Command Line Tools alone,
+      # which is why local CLT-only machines can't build the GUI package directly).
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build app package
+        run: swift build --package-path app -v
