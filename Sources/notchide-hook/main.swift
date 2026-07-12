@@ -29,6 +29,13 @@ import NotchideKit
 
 // MARK: - Entry point / dispatch
 
+// Ignore SIGPIPE process-wide so a write to a broken pipe (stdout closed by
+// Claude Code, or a peer socket that went away) fails with EPIPE instead of
+// terminating us with a signal — which would bypass the fail-open contract
+// before we can exit 0. Socket writes are additionally guarded per-fd via
+// SO_NOSIGPIPE; this covers stdout, which cannot carry that option.
+signal(SIGPIPE, SIG_IGN)
+
 let rawArgs = Array(CommandLine.arguments.dropFirst())
 
 // Backward-compatible fast path: in-process IPC round-trip for debugging.
@@ -64,10 +71,12 @@ default:
 /// error (see the contract above). Never returns.
 func runHandle(explicitEventName: String?) -> Never {
     // ── Read the hook event JSON from stdin ──────────────────────────────────
-    let stdinData = FileHandle.standardInput.readDataToEndOfFile()
-
-    // Decode robustly. If we cannot parse the input at all, fail open.
-    guard let event = try? JSONDecoder().decode(HookEvent.self, from: stdinData) else {
+    // Use low-level POSIX reads (not FileHandle.readDataToEndOfFile, whose
+    // Obj-C exception on an I/O error would bypass fail-open by unwinding past
+    // our exit(0)). ANY failure — read error, empty, or absurdly huge input —
+    // degrades to fail-open.
+    guard let stdinData = readAllStdin(),
+          let event = try? JSONDecoder().decode(HookEvent.self, from: stdinData) else {
         failOpen()
     }
 
@@ -77,7 +86,11 @@ func runHandle(explicitEventName: String?) -> Never {
         ?? eventNameOverride(from: CommandLine.arguments)
     let effectiveEventName = overridden ?? event.hookEventName
 
-    let socketPath = NotchidePaths.socketPath
+    // Socket path: an explicit NOTCHIDE_SOCKET_PATH override (used by the e2e
+    // test and useful for dev / multiple instances) wins; otherwise the default
+    // ~/Library/Application Support/notchide/hook.sock.
+    let socketPath = ProcessInfo.processInfo.environment["NOTCHIDE_SOCKET_PATH"]
+        .flatMap { $0.isEmpty ? nil : $0 } ?? NotchidePaths.socketPath
 
     // Only PreToolUse is a blocking permission gate; everything else is
     // best-effort fire-and-forget.
@@ -86,10 +99,12 @@ func runHandle(explicitEventName: String?) -> Never {
 
     if isBlocking {
         // A permission prompt legitimately waits for a human. Default 10 minutes;
-        // overridable via NOTCHIDE_HOOK_TIMEOUT_MS.
-        let timeoutMs = ProcessInfo.processInfo.environment["NOTCHIDE_HOOK_TIMEOUT_MS"]
-            .flatMap(Double.init) ?? 600_000
-        let timeout = timeoutMs / 1000.0
+        // overridable via NOTCHIDE_HOOK_TIMEOUT_MS. Parsing is strict and clamped
+        // (see HookTimeout) so a malformed value can never make this hang
+        // unbounded or crash.
+        let timeoutMs = HookTimeout.milliseconds(
+            from: ProcessInfo.processInfo.environment["NOTCHIDE_HOOK_TIMEOUT_MS"])
+        let timeout = Double(timeoutMs) / 1000.0
 
         // Any throw here (connect/write failure) → fail open. A nil decision
         // (timeout / malformed / app declined to decide) → fail open.
@@ -109,7 +124,7 @@ func runHandle(explicitEventName: String?) -> Never {
         // Claude Code decision schema, so it is not emitted here.)
         let hookDecision = HookDecision(permission: decision.permission, reason: decision.reason)
         if let json = try? hookDecision.jsonString() {
-            print(json)
+            writeStdoutLine(json)
         }
         exit(0)
     } else {
@@ -128,6 +143,50 @@ func runHandle(explicitEventName: String?) -> Never {
 /// Exit cleanly (fail-open): print nothing and exit 0.
 func failOpen() -> Never {
     exit(0)
+}
+
+/// Reads all of stdin using low-level POSIX reads. Unlike
+/// `FileHandle.readDataToEndOfFile()`, this can never raise an Obj-C exception
+/// on an I/O error (which would unwind past our fail-open exit). Returns `nil`
+/// on any read error or if the input exceeds `limit` (absurdly huge input is
+/// treated as a failure → fail open). An empty stdin returns empty `Data`,
+/// which then fails to decode and also fails open.
+func readAllStdin(limit: Int = 8 * 1024 * 1024) -> Data? {
+    var data = Data()
+    var buffer = [UInt8](repeating: 0, count: 65536)
+    while true {
+        let n = read(0, &buffer, buffer.count)
+        if n < 0 {
+            if errno == EINTR { continue }
+            return nil // I/O error → fail open
+        }
+        if n == 0 { break } // EOF
+        data.append(contentsOf: buffer[0..<n])
+        if data.count > limit { return nil } // too large → fail open
+    }
+    return data
+}
+
+/// Writes a line to stdout (fd 1) without risking SIGPIPE termination. SIGPIPE
+/// is ignored process-wide, so a broken stdout pipe fails the write with EPIPE
+/// instead of killing us before we can exit 0. Any write error is swallowed —
+/// the handler still exits 0 (fail-open).
+func writeStdoutLine(_ string: String) {
+    let bytes = Array((string + "\n").utf8)
+    bytes.withUnsafeBytes { raw in
+        guard let base = raw.baseAddress else { return }
+        let count = raw.count
+        var total = 0
+        while total < count {
+            let n = write(1, base.advanced(by: total), count - total)
+            if n < 0 {
+                if errno == EINTR { continue }
+                return // EPIPE or other error → give up silently
+            }
+            if n == 0 { return }
+            total += n
+        }
+    }
 }
 
 /// Parses an optional `--event <Name>` override from argv (legacy handler form).
@@ -196,7 +255,18 @@ func runInstall(_ opts: CLIOptions) -> Never {
         exit(1)
     }
 
-    let merged = HookInstaller.install(into: existing, binaryPath: binaryPath)
+    let merged: [String: Any]
+    do {
+        // Shape-checking variant: aborts rather than silently clobbering a
+        // present-but-malformed `hooks` value.
+        merged = try HookInstaller.installChecked(into: existing, binaryPath: binaryPath)
+    } catch let HookInstaller.HookInstallError.malformedHooks(why) {
+        errPrintln("error: cannot install into \(settingsPath): \(why); aborting without changes to your config.")
+        exit(1)
+    } catch {
+        errPrintln("error: cannot install into \(settingsPath): \(error.localizedDescription); aborting without changes.")
+        exit(1)
+    }
 
     print("notchide-hook install")
     print("  binary:   \(binaryPath)")
@@ -381,13 +451,22 @@ func ensureParentDirectory(of path: String) throws {
     try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
 }
 
-/// Copies an existing settings file to `settings.json.bak.<unix-timestamp>`.
-/// Returns the backup path, or `nil` if there was no file to back up.
+/// Copies an existing settings file to a UNIQUE `settings.json.bak.<ts>[.<n>]`
+/// path, never overwriting an existing backup. Returns the backup path, or
+/// `nil` if there was no file to back up.
+///
+/// The 1-second timestamp is not unique on its own: two installs in the same
+/// second would otherwise collide and destroy the earlier backup. We therefore
+/// probe for a free name (`.bak.<ts>`, then `.bak.<ts>.1`, `.2`, …) so every
+/// backup is preserved.
 func backUpIfPresent(_ path: String) throws -> String? {
     guard FileManager.default.fileExists(atPath: path) else { return nil }
-    let backup = "\(path).bak.\(Int(Date().timeIntervalSince1970))"
-    if FileManager.default.fileExists(atPath: backup) {
-        try? FileManager.default.removeItem(atPath: backup)
+    let base = "\(path).bak.\(Int(Date().timeIntervalSince1970))"
+    var backup = base
+    var counter = 1
+    while FileManager.default.fileExists(atPath: backup) {
+        backup = "\(base).\(counter)"
+        counter += 1
     }
     try FileManager.default.copyItem(atPath: path, toPath: backup)
     return backup

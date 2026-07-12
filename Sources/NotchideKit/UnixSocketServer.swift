@@ -61,13 +61,17 @@ public final class UnixSocketServer: @unchecked Sendable {
             throw SocketError.bind(err)
         }
 
+        // Restrict permissions to 0600 BEFORE listen(), so the socket is never
+        // reachable while world-accessible. (A client cannot connect to a bound
+        // socket until listen() is called, so doing chmod first closes the
+        // permissions window entirely.)
+        chmod(socketPath, 0o600)
+
         guard listen(fd, 16) == 0 else {
             let err = errno
             close(fd)
             throw SocketError.listen(err)
         }
-
-        chmod(socketPath, 0o600)
 
         // Non-blocking listen fd so the accept loop can poll and observe stop().
         let flags = fcntl(fd, F_GETFL, 0)
@@ -108,16 +112,30 @@ public final class UnixSocketServer: @unchecked Sendable {
             var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
             let pr = poll(&pfd, 1, 100) // 100ms tick lets us observe stop()
             if pr < 0 {
-                if errno == EINTR { continue }
-                break
+                let err = errno
+                if err == EINTR { continue }
+                // Only a stop() teardown should end the loop; any other poll
+                // error is treated as transient so the server is never
+                // permanently disabled. Back off briefly to avoid a hot spin.
+                if !isRunning() { break }
+                usleep(50_000) // 50ms
+                continue
             }
             if pr == 0 { continue } // timeout: re-check running
             if (pfd.revents & Int16(POLLIN)) == 0 { continue }
 
             let clientFD = accept(fd, nil, nil)
             if clientFD < 0 {
-                if errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK { continue }
-                break // listen fd closed by stop()
+                let err = errno
+                if err == EINTR || err == EAGAIN || err == EWOULDBLOCK { continue }
+                // The listen fd being torn down by stop() is the ONLY reason to
+                // exit. Every other accept() error — EMFILE/ENFILE (fd
+                // exhaustion), ECONNABORTED, etc. — is transient and must never
+                // permanently kill the server; back off on resource exhaustion
+                // and keep accepting.
+                if !isRunning() { break }
+                if err == EMFILE || err == ENFILE { usleep(50_000) } // 50ms
+                continue
             }
             disableSIGPIPE(clientFD)
             // The accepted socket can inherit O_NONBLOCK from the listening

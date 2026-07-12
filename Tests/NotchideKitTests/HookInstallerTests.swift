@@ -57,14 +57,16 @@ struct HookInstallerTests {
         let preHandlers = try #require(preGroup["hooks"] as? [Any])
         let preHandler = try #require(preHandlers.first as? [String: Any])
         #expect(preHandler["type"] as? String == "command")
-        #expect(preHandler["command"] as? String == "\(binary) handle PreToolUse")
+        #expect(preHandler["command"] as? String == HookInstaller.command(for: "PreToolUse", binaryPath: binary))
+        // The path is single-quoted so a spaced/odd path stays one shell word.
+        #expect(preHandler["command"] as? String == "'\(binary)' handle PreToolUse")
 
         // Notification / Stop / SubagentStop omit the matcher.
         for event in ["Notification", "Stop", "SubagentStop"] {
             let groups = try #require(hooks[event] as? [Any])
             let group = try #require(groups.first as? [String: Any])
             #expect(group["matcher"] == nil, "\(event) must omit matcher")
-            #expect(try firstCommand(result, event: event) == "\(binary) handle \(event)")
+            #expect(try firstCommand(result, event: event) == HookInstaller.command(for: event, binaryPath: binary))
         }
 
         // doctor sees all four wired.
@@ -93,7 +95,7 @@ struct HookInstallerTests {
         let notchideGroup = try #require(preGroups[1] as? [String: Any])
         #expect(notchideGroup["matcher"] as? String == "*")
         let notchideHandler = try #require((notchideGroup["hooks"] as? [Any])?.first as? [String: Any])
-        #expect(notchideHandler["command"] as? String == "\(binary) handle PreToolUse")
+        #expect(notchideHandler["command"] as? String == HookInstaller.command(for: "PreToolUse", binaryPath: binary))
 
         // The other three events are added fresh.
         #expect(HookInstaller.wiredEvents(in: result) == Set(HookInstaller.managedEvents))
@@ -174,5 +176,86 @@ struct HookInstallerTests {
         hooks.removeValue(forKey: "Stop")
         partial["hooks"] = hooks
         #expect(HookInstaller.wiredEvents(in: partial) == ["PreToolUse", "Notification", "SubagentStop"])
+    }
+
+    // MARK: - Quoting / spaced binary paths (item 1) + precise detection (item 3)
+
+    @Test("install single-quotes a binary path with spaces; the command round-trips and uninstall removes it")
+    func spacedBinaryPathRoundTrips() throws {
+        let spaced = "/Users/My Apps/notchide-hook"
+        let installed = HookInstaller.install(into: [:], binaryPath: spaced)
+
+        // The generated command quotes the path as one shell word.
+        let cmd = try firstCommand(installed, event: "PreToolUse")
+        #expect(cmd == "'/Users/My Apps/notchide-hook' handle PreToolUse")
+
+        // The first shell token parses back to the exact (spaced) path.
+        #expect(HookInstaller.firstShellToken(cmd) == spaced)
+
+        // Still detected as notchide's on all four events…
+        #expect(HookInstaller.wiredEvents(in: installed) == Set(HookInstaller.managedEvents))
+        // …and uninstall removes it cleanly, back to empty.
+        #expect(deepEqual(HookInstaller.uninstall(from: installed), [:]))
+    }
+
+    @Test("install escapes an embedded single quote in the path and still round-trips")
+    func quotedBinaryPathRoundTrips() throws {
+        let weird = "/Users/O'Brien/notchide-hook"
+        let installed = HookInstaller.install(into: [:], binaryPath: weird)
+
+        let cmd = try firstCommand(installed, event: "PreToolUse")
+        #expect(cmd == "'/Users/O'\\''Brien/notchide-hook' handle PreToolUse")
+        #expect(HookInstaller.firstShellToken(cmd) == weird)
+
+        #expect(HookInstaller.wiredEvents(in: installed) == Set(HookInstaller.managedEvents))
+        #expect(deepEqual(HookInstaller.uninstall(from: installed), [:]))
+    }
+
+    @Test("detection is a precise basename match, not a loose substring")
+    func detectionIsPreciseBasenameMatch() {
+        // An unrelated tool whose command merely contains "notchide-hook" must
+        // NOT be treated as notchide's (basename here is `run`, not
+        // `notchide-hook`), so uninstall leaves it untouched.
+        let lookalike: [String: Any] = [
+            "hooks": [
+                "PreToolUse": [
+                    ["matcher": "*", "hooks": [
+                        ["type": "command", "command": "/opt/notchide-hook-wrapper/run --pre"]
+                    ]]
+                ]
+            ]
+        ]
+        #expect(HookInstaller.wiredEvents(in: lookalike).isEmpty)
+        #expect(deepEqual(HookInstaller.uninstall(from: lookalike), lookalike))
+    }
+
+    // MARK: - installChecked aborts on malformed config (item 5)
+
+    @Test("installChecked aborts when `hooks` is present but not an object")
+    func installCheckedRejectsMalformedHooks() {
+        let bad: [String: Any] = ["hooks": "not-an-object", "model": "opus"]
+        #expect(throws: HookInstaller.HookInstallError.self) {
+            _ = try HookInstaller.installChecked(into: bad, binaryPath: binary)
+        }
+    }
+
+    @Test("installChecked aborts when a managed event value is not an array")
+    func installCheckedRejectsMalformedEvent() {
+        let bad: [String: Any] = ["hooks": ["PreToolUse": "oops"]]
+        #expect(throws: HookInstaller.HookInstallError.self) {
+            _ = try HookInstaller.installChecked(into: bad, binaryPath: binary)
+        }
+    }
+
+    @Test("installChecked equals install on well-formed input")
+    func installCheckedMatchesInstallOnValidInput() throws {
+        let existing = settingsWithOtherTool()
+        let checked = try HookInstaller.installChecked(into: existing, binaryPath: binary)
+        let plain = HookInstaller.install(into: existing, binaryPath: binary)
+        #expect(deepEqual(checked, plain))
+
+        // And from empty.
+        let checkedEmpty = try HookInstaller.installChecked(into: [:], binaryPath: binary)
+        #expect(deepEqual(checkedEmpty, HookInstaller.install(into: [:], binaryPath: binary)))
     }
 }

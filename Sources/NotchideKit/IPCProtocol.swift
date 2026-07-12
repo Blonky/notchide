@@ -53,6 +53,39 @@ public enum NDJSON {
     }
 }
 
+/// Parsing/clamping for the blocking-gate timeout (`NOTCHIDE_HOOK_TIMEOUT_MS`).
+///
+/// The PreToolUse gate blocks a real agent, so its timeout must be derived from
+/// untrusted environment input without any chance of hanging unbounded or
+/// crashing: NaN/inf, negative, non-numeric, or absurdly large values all fall
+/// back to a safe default rather than propagating into the wait.
+public enum HookTimeout {
+    /// Default blocking-gate timeout: 10 minutes (a human may take a while to
+    /// answer a permission prompt).
+    public static let defaultMilliseconds = 600_000
+    /// Upper clamp: 1 hour. Anything larger is clamped to this.
+    public static let maxMilliseconds = 3_600_000
+
+    /// Strictly parses a `NOTCHIDE_HOOK_TIMEOUT_MS` override into a finite,
+    /// non-negative integer number of milliseconds, clamped to
+    /// `0...maxMilliseconds`.
+    ///
+    /// Any invalid input — nil, empty, non-integer (including `"1.5"`,
+    /// `"1e3"`, `"nan"`, `"inf"`), negative, or beyond `Int`'s range — yields
+    /// `defaultMilliseconds`. The result can therefore never be NaN/inf,
+    /// negative, or unbounded, which is what keeps the fail-open timeout path
+    /// safe.
+    public static func milliseconds(from raw: String?) -> Int {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespaces),
+              !trimmed.isEmpty,
+              let value = Int(trimmed),
+              value >= 0 else {
+            return defaultMilliseconds
+        }
+        return min(value, maxMilliseconds)
+    }
+}
+
 /// Filesystem locations used by notchide.
 public enum NotchidePaths {
     /// `~/Library/Application Support/notchide`

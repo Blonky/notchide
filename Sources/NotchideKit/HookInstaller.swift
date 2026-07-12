@@ -34,9 +34,11 @@ public enum HookInstaller {
     /// The four hook events notchide wires, in the order it presents them.
     public static let managedEvents = ["PreToolUse", "Notification", "Stop", "SubagentStop"]
 
-    /// Substring that uniquely identifies a hook handler as notchide's own. Any
-    /// handler whose `command` contains this marker is treated as belonging to
-    /// notchide for the purposes of idempotent install, uninstall, and doctor.
+    /// The executable basename that uniquely identifies a hook handler as
+    /// notchide's own. A handler is treated as belonging to notchide iff the
+    /// basename of its command's first (executable) shell token equals this —
+    /// a precise match, not a loose substring, so an unrelated tool whose
+    /// command merely mentions "notchide-hook" is never touched.
     static let marker = "notchide-hook"
 
     /// The `matcher` value for an event, or `nil` when the event omits it.
@@ -45,9 +47,72 @@ public enum HookInstaller {
     }
 
     /// The exact `command` string notchide writes for an event:
-    /// `"<abs-path-to-binary> handle <EventName>"`.
+    /// `"'<abs-path-to-binary>' handle <EventName>"`.
+    ///
+    /// The binary path is single-quoted (with any embedded single quote escaped
+    /// as `'\''`) so a path containing spaces or shell metacharacters is passed
+    /// to the shell as a single argument and the gate actually fires. Detection
+    /// and uninstall parse this quoting back out (see `firstShellToken`).
     public static func command(for event: String, binaryPath: String) -> String {
-        "\(binaryPath) handle \(event)"
+        "\(shellSingleQuote(binaryPath)) handle \(event)"
+    }
+
+    /// Wraps a string in single quotes for safe use as one shell word, escaping
+    /// any embedded single quote using the standard `'\''` idiom.
+    static func shellSingleQuote(_ string: String) -> String {
+        "'" + string.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// Extracts the first shell token (the executable word) from a command
+    /// string, honoring single-quote quoting and backslash escaping the way a
+    /// POSIX shell would. Returns `nil` for an empty/blank command.
+    ///
+    /// This is what makes detection robust to quoted, spaced paths: for
+    /// `'/Users/My Apps/notchide-hook' handle PreToolUse` it returns
+    /// `/Users/My Apps/notchide-hook`, and for the legacy unquoted
+    /// `/usr/local/bin/notchide-hook handle PreToolUse` it returns
+    /// `/usr/local/bin/notchide-hook`.
+    static func firstShellToken(_ command: String) -> String? {
+        var result = ""
+        var inSingleQuote = false
+        var started = false
+        let chars = Array(command)
+        var i = 0
+        while i < chars.count {
+            let c = chars[i]
+            if inSingleQuote {
+                if c == "'" {
+                    inSingleQuote = false
+                } else {
+                    result.append(c)
+                }
+                i += 1
+                continue
+            }
+            switch c {
+            case "'":
+                inSingleQuote = true
+                started = true
+                i += 1
+            case "\\":
+                // Backslash escapes the next character (POSIX, outside quotes).
+                if i + 1 < chars.count {
+                    result.append(chars[i + 1])
+                    i += 2
+                } else {
+                    i += 1
+                }
+                started = true
+            case " ", "\t":
+                if started { return result } // end of the first token
+                i += 1 // skip leading whitespace
+            default:
+                result.append(c)
+                started = true
+                i += 1
+            }
+        }
+        return started ? result : nil
     }
 
     // MARK: - Install (merge)
@@ -84,6 +149,38 @@ public enum HookInstaller {
 
         result["hooks"] = hooks
         return result
+    }
+
+    /// Thrown by `installChecked` when the existing config cannot be safely
+    /// merged into without risking data loss.
+    public enum HookInstallError: Error, Equatable {
+        /// The existing `hooks` value — or a managed event's value — is present
+        /// but has an unexpected shape. The associated string explains which.
+        case malformedHooks(String)
+    }
+
+    /// Shape-validating variant of `install`.
+    ///
+    /// `install` assumes a well-formed settings dict and, on a malformed
+    /// `hooks` object (or a non-array event value), would silently discard it.
+    /// `installChecked` instead ABORTS by throwing `HookInstallError` so the
+    /// caller can refuse to clobber the user's config. On well-formed input it
+    /// is identical to `install`. This is the entry point the `notchide-hook`
+    /// CLI uses.
+    public static func installChecked(into settings: [String: Any], binaryPath: String) throws -> [String: Any] {
+        if let hooksAny = settings["hooks"] {
+            guard let hooks = hooksAny as? [String: Any] else {
+                throw HookInstallError.malformedHooks(
+                    "`hooks` is present but is not a JSON object")
+            }
+            for event in managedEvents {
+                if let eventValue = hooks[event], !(eventValue is [Any]) {
+                    throw HookInstallError.malformedHooks(
+                        "`hooks.\(event)` is present but is not an array")
+                }
+            }
+        }
+        return install(into: settings, binaryPath: binaryPath)
     }
 
     // MARK: - Uninstall (unmerge)
@@ -180,11 +277,17 @@ public enum HookInstaller {
 
     // MARK: - Helpers
 
-    /// True when a hook handler is one of notchide's (its `command` contains the
-    /// `notchide-hook` marker).
+    /// True when a hook handler is one of notchide's: the basename of its
+    /// command's first (executable) shell token equals `notchide-hook`.
+    ///
+    /// This is a precise match. An unrelated tool whose command merely contains
+    /// the text "notchide-hook" (e.g. `/opt/notchide-hook-wrapper/run`, whose
+    /// basename is `run`) is NOT matched, so uninstall never removes it. Quoted
+    /// and spaced paths are handled via `firstShellToken`.
     private static func handlerIsNotchide(_ handler: Any) -> Bool {
         guard let dict = handler as? [String: Any],
-              let command = dict["command"] as? String else { return false }
-        return command.contains(marker)
+              let command = dict["command"] as? String,
+              let token = firstShellToken(command) else { return false }
+        return (token as NSString).lastPathComponent == marker
     }
 }

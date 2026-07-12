@@ -70,7 +70,11 @@ public enum JSONValue: Sendable, Codable, Equatable {
     }
 
     public var intValue: Int? {
-        doubleValue.map(Int.init)
+        // Non-trapping: `Int(Double)` crashes on NaN/inf/out-of-range, so use
+        // `Int(exactly:)` which returns nil for any value that has no exact Int
+        // representation (NaN, ±inf, or magnitudes beyond Int's range).
+        guard let value = doubleValue else { return nil }
+        return Int(exactly: value.rounded())
     }
 
     public var boolValue: Bool? {
