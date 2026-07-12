@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>notchide</string>
+    <key>CFBundleIdentifier</key>
+    <string>dev.blonky.notchide</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>notchide</string>
+    <key>CFBundleDisplayName</key>
+    <string>notchide</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+
+    <!-- Agent (accessory) app: no Dock icon, no menu-bar item. -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>notchide — MIT License</string>
+
+    <!-- Accessibility / automation usage notes.
+         notchide's "jump to terminal" uses AppleScript (Apple Events) to activate
+         your agent's terminal. The global summon hotkey uses an NSEvent global
+         monitor, which macOS gates behind the Accessibility (AXIsProcessTrusted)
+         permission — the OS prompts for that at runtime; there is no Info.plist
+         key for it. Precise per-window / per-Space detection (a later milestone)
+         will also require Accessibility. -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>notchide can activate your agent's terminal (Terminal, iTerm2, Ghostty, …) so you can jump to it from the review console.</string>
+</dict>
+</plist>

@@ -1,0 +1,80 @@
+# XcodeGen spec for the real, notarizable notchide.app.
+#
+#   brew install xcodegen
+#   cd app && xcodegen generate      # → notchide.xcodeproj
+#   xcodebuild -project notchide.xcodeproj -scheme notchide -configuration Release build
+#
+# Mirrors the SwiftPM layout: a `NotchideApp` framework holding all the UI code
+# (linking DynamicNotchKit + the local NotchideKit), and a thin `notchide`
+# application that embeds it. Building the GUI needs full Xcode (the SwiftUI
+# `@Entry` / `#Preview` macros DynamicNotchKit uses require Xcode's macro
+# plugins, which the Command Line Tools do not ship).
+name: notchide
+
+options:
+  bundleIdPrefix: dev.blonky
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_STRICT_CONCURRENCY: complete
+
+packages:
+  DynamicNotchKit:
+    url: https://github.com/MrKai77/DynamicNotchKit
+    exactVersion: 1.1.0
+  NotchideKit:
+    path: ".."
+
+targets:
+  # All UI/controller/wiring code — the shipped equivalent of the SwiftPM
+  # `NotchideApp` library target.
+  NotchideApp:
+    type: framework
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - Sources/NotchideApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.blonky.notchide.kit
+        PRODUCT_NAME: NotchideApp
+    dependencies:
+      - package: DynamicNotchKit
+        product: DynamicNotchKit
+      - package: NotchideKit
+        product: NotchideKit
+
+  # Thin accessory app that embeds the framework and boots it.
+  notchide:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - Sources/notchide
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.blonky.notchide
+        PRODUCT_NAME: notchide
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_FILE: Info.plist
+        ENABLE_HARDENED_RUNTIME: YES
+        # notchide draws above fullscreen apps; the notarized .dmg build enables
+        # the hardened runtime. Private-framework (SkyLight/CGSSpace) entitlements
+        # are a later milestone (see docs/DESIGN.md §10).
+    dependencies:
+      - target: NotchideApp
+
+schemes:
+  notchide:
+    build:
+      targets:
+        notchide: all
+    run:
+      config: Debug
