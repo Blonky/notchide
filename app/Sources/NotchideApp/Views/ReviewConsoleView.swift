@@ -3,10 +3,15 @@ import NotchideKit
 
 /// The expanded, READ-ONLY review console — the payoff surface.
 ///
-/// Shows, for the single most-urgent session: a decision header (context chips),
-/// the exact pending command (destructive tokens highlighted), the live git
-/// diff, an output tail, the decision controls + a one-line redirect field, a
-/// persistent jump-to-terminal affordance, and the "why did this tap?" line.
+/// Shows, for the single most-urgent session: a decision header (provider badge +
+/// context chips), the exact pending command (destructive tokens highlighted),
+/// the live git diff, an output tail, and the "why did this tap?" line.
+///
+/// The action surface is capability-aware:
+///   • a GATE lane (`.blocking`, `showsDecisionButtons`) gets the full decision
+///     row — Deny / Approve / Approve-and-remember + a one-line redirect field;
+///   • an OBSERVE-only lane (`.notifyOnly`) NEVER shows buttons it cannot honor —
+///     it gets a quiet "notify-only · log-tailed" banner + Jump-to-terminal.
 public struct ReviewConsoleView: View {
     @ObservedObject var model: NotchViewModel
     @State private var redirectText: String = ""
@@ -38,7 +43,9 @@ public struct ReviewConsoleView: View {
                 onClose: { model.onCollapse?() }
             )
 
-            CommandBlockView(review: review)
+            if review.command != nil || !review.isObserveOnly {
+                CommandBlockView(review: review)
+            }
 
             DiffView(diff: review.diff)
                 .frame(maxHeight: 240)
@@ -47,21 +54,31 @@ public struct ReviewConsoleView: View {
                 OutputTailView(text: tail)
             }
 
-            ActionBarView(
-                // A timed-out / dropped gate disables its controls so a stale
-                // click can't "decide" something already gone.
-                enabled: review.wantsDecision && !review.isExpired,
-                isDestructive: review.isDestructive,
-                redirectText: $redirectText,
-                onDeny: { model.onDecide?(.deny, "Denied from notchide", nil) },
-                onApprove: { model.onDecide?(.allow, nil, nil) },
-                onApproveRemember: { model.onApproveRemember?() },
-                onRedirect: {
-                    let text = redirectText.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !text.isEmpty else { return }
-                    model.onDecide?(.deny, text, text)
-                }
-            )
+            if review.isObserveOnly {
+                // Observe-only (notify-only) lane: never render decision buttons it
+                // structurally cannot honor. Show a quiet capability banner + a jump
+                // to the terminal instead. (Gallery state 6.)
+                CapabilityBannerView(
+                    onJumpToTerminal: { model.onJumpToTerminal?(review.cwd) }
+                )
+            } else {
+                ActionBarView(
+                    // A timed-out / dropped gate (or a summoned blocking lane with no
+                    // live gate) disables its controls so a stale click can't "decide"
+                    // something already gone.
+                    enabled: review.showsDecisionButtons,
+                    isDestructive: review.isDestructive,
+                    redirectText: $redirectText,
+                    onDeny: { model.onDecide?(.deny, "Denied from notchide", nil) },
+                    onApprove: { model.onDecide?(.allow, nil, nil) },
+                    onApproveRemember: { model.onApproveRemember?() },
+                    onRedirect: {
+                        let text = redirectText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !text.isEmpty else { return }
+                        model.onDecide?(.deny, text, text)
+                    }
+                )
+            }
 
             WhyTappedView(reason: review.reason)
         }
@@ -99,6 +116,7 @@ private struct DecisionHeaderView: View {
 
     var body: some View {
         HStack(spacing: Theme.Spacing.sm) {
+            ProviderBadge(providerID: review.providerID)
             ContextChip(icon: "cpu", text: review.shortSessionId)
             if let branch = review.branch {
                 ContextChip(icon: "arrow.triangle.branch", text: branch)
@@ -175,7 +193,9 @@ private struct CommandBlockView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack(spacing: Theme.Spacing.sm) {
-                Text("PENDING PERMISSION")
+                // An observe-only lane has no pending permission — it is showing
+                // recent activity, so the label must not imply a gate.
+                Text(review.isObserveOnly ? "RECENT ACTIVITY" : "PENDING PERMISSION")
                     .font(.system(size: 10, weight: .semibold))
                     .tracking(0.8)
                     .foregroundStyle(Theme.textTertiary)
@@ -383,6 +403,79 @@ private struct DecisionButton: View {
         case .neutral: return Theme.hairlineStrong
         case .ghost: return Theme.hairline
         }
+    }
+}
+
+// MARK: - Provider badge
+
+/// A small badge naming the lane's owning provider (e.g. `sh.claude` → "claude").
+private struct ProviderBadge: View {
+    let providerID: ProviderID
+
+    private var displayName: String {
+        providerID.raw.split(separator: ".").last.map(String.init) ?? providerID.raw
+    }
+
+    var body: some View {
+        Text(displayName)
+            .font(.system(size: 9, weight: .semibold))
+            .tracking(0.5)
+            .foregroundStyle(Theme.textSecondary)
+            .padding(.horizontal, Theme.Spacing.sm)
+            .padding(.vertical, Theme.Spacing.xs)
+            .background(Theme.flowing.opacity(0.14))
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(Theme.flowing.opacity(0.35), lineWidth: 1))
+            .help("Provider: \(providerID.raw)")
+    }
+}
+
+// MARK: - Observe-only capability banner (gallery state 6)
+
+/// Replaces the decision row for a `.notifyOnly` lane. notchide can only tail the
+/// log for such a provider — it structurally cannot gate it — so we say so plainly
+/// and offer the one honorable action: jump to the terminal.
+private struct CapabilityBannerView: View {
+    let onJumpToTerminal: () -> Void
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.md) {
+            HStack(spacing: Theme.Spacing.xs) {
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.flowing)
+                Text("notify-only · log-tailed")
+                    .font(Typo.chip)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            Spacer(minLength: 0)
+            Button(action: onJumpToTerminal) {
+                HStack(spacing: Theme.Spacing.xs) {
+                    Image(systemName: "terminal")
+                        .font(.system(size: 11, weight: .medium))
+                    Text("Jump to terminal")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundStyle(Theme.textPrimary)
+                .padding(.horizontal, Theme.Spacing.lg)
+                .padding(.vertical, Theme.Spacing.sm)
+                .background(Theme.raisedSurface)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                        .stroke(Theme.hairlineStrong, lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.vertical, Theme.Spacing.sm)
+        .background(Theme.sunkenSurface)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                .stroke(Theme.hairline, lineWidth: 1)
+        )
     }
 }
 

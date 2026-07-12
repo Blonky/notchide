@@ -11,13 +11,24 @@ import NotchideKit
 /// `@MainActor` throughout — all DynamicNotchKit control (`expand`/`compact`/
 /// `hide`, which are `@MainActor` in the library) and all SwiftUI/AppKit state
 /// mutation happen here.
+///
+/// In the AAP model the socket transport lives entirely inside
+/// `SocketAAPProvider`, which owns decision correlation. This controller no
+/// longer brokers decisions itself: it consumes vendor-neutral `AgentEvent`s
+/// (via `consider`) and lane snapshots (via `lanesDidUpdate`), and on a decision
+/// button press hands an `AgentDecision` back through `resolveDecision`, which the
+/// provider writes onto the correlated open connection.
 @MainActor
 public final class NotchController {
     private let model: NotchViewModel
-    private let broker: DecisionBroker
+    private let suppressor: Suppressor
+    private let frontmost: FrontmostContextProviding
     private let diffProvider: GitDiffProvider
     private let terminalJumper: TerminalJumper
     private let remembered: RememberedStore
+    /// Hands a resolved decision back to the owning provider (which writes the
+    /// frame onto the correlated open connection). Replaces the old DecisionBroker.
+    private let resolveDecision: @Sendable (AgentDecision) async -> Void
 
     /// The DynamicNotchKit panel. `.auto` style resolves to a real notch on
     /// notched Macs and to the first-class floating pill everywhere else.
@@ -37,15 +48,25 @@ public final class NotchController {
     private var autoCollapseTask: Task<Void, Never>?
     private var hoverObserverTask: Task<Void, Never>?
 
+    /// The most recent event per session, kept so a summoned/hover-expanded lane
+    /// can still render a rich console (tool name + last message) even though a
+    /// `Lane` snapshot alone does not carry the payload.
+    private var latestEvents: [SessionKey: AgentEvent] = [:]
+
+    /// Decision ids for gates still awaiting the user (on screen or queued). The
+    /// provider owns wire correlation; this is the app-side "still pending?" gate
+    /// used for queueing and dequeue-skipping (replaces `DecisionBroker.isPending`).
+    private var outstandingGates: Set<UUID> = []
+
     /// Outstanding decision gates queued behind the one currently on screen, in
     /// arrival order. A newer gate (or a non-decision tap) must never replace a
-    /// still-pending decision the broker is awaiting (see `present`).
+    /// still-pending decision (see `present`).
     private var pendingGates: [ReviewContext] = []
     private let maxQueuedGates = 32
 
     /// Per-gate app-side expiry timers (see F): when a shown gate expires, its
     /// console controls are disabled and it is furled so a stale click can't
-    /// "decide" something already dropped.
+    /// "decide" something already dropped. Keyed by decision id.
     private var gateExpiryTasks: [UUID: Task<Void, Never>] = [:]
 
     /// How long the console stays down before auto-furling (unless pinned/hovered).
@@ -59,16 +80,20 @@ public final class NotchController {
 
     public init(
         model: NotchViewModel,
-        broker: DecisionBroker,
+        suppressor: Suppressor,
+        frontmost: FrontmostContextProviding,
         diffProvider: GitDiffProvider,
         terminalJumper: TerminalJumper,
-        remembered: RememberedStore
+        remembered: RememberedStore,
+        resolveDecision: @escaping @Sendable (AgentDecision) async -> Void
     ) {
         self.model = model
-        self.broker = broker
+        self.suppressor = suppressor
+        self.frontmost = frontmost
         self.diffProvider = diffProvider
         self.terminalJumper = terminalJumper
         self.remembered = remembered
+        self.resolveDecision = resolveDecision
     }
 
     // MARK: Lifecycle
@@ -121,37 +146,54 @@ public final class NotchController {
         }
     }
 
-    /// Surface a specific envelope in the review console. Called by the socket
-    /// handler ONLY for `wantsDecision` gates — the one deliberate auto-expand.
-    /// (Non-decision taps go through `pulsePill`, never here.)
-    public func present(envelope: HookEnvelope, reason: String) async {
-        let context = makeContext(envelope: envelope, reason: reason)
+    /// The attention router for a single incoming event. Decides whether it taps
+    /// the user, applies the approve-and-remember fast path, and — for a blocking
+    /// gate — auto-surfaces the review console. Non-decision taps (Stop /
+    /// Notification) stay passive: they pulse the pill, never auto-expand.
+    public func consider(event: AgentEvent, capability: DecisionCapability) async {
+        latestEvents[event.sessionKey] = event
 
-        guard context.wantsDecision else {
-            // Defensive: a non-decision surfacing must never clobber a pending
-            // decision the broker is still awaiting.
-            if let current = model.review, current.wantsDecision, await broker.isPending(current.id) {
-                return
-            }
-            await show(context)
+        let isGate = event.kind == .needsDecision
+            && capability == .blocking
+            && event.decision != nil
+
+        // Approve-and-remember fast path: a blocking gate whose exact, normalized
+        // command was previously remembered resolves .allow immediately and
+        // silently — the console is never shown.
+        if isGate,
+           let decisionID = event.decision?.id,
+           let command = event.command,
+           await remembered.contains(command) {
+            await resolveDecision(AgentDecision(id: decisionID, verdict: .allow, reason: "remembered by notchide"))
             return
         }
 
-        // A decision gate. If a *different* still-pending gate is already on
-        // screen, queue behind it rather than stranding the earlier decision.
-        if let current = model.review,
-           current.wantsDecision,
-           current.id != context.id,
-           await broker.isPending(current.id) {
-            enqueueGate(context)
-            return
+        // Attention routing: should this actually tap the user? (Global mute is
+        // threaded through here — a muted user is never tapped.)
+        let (tap, reason) = await suppressor.shouldTap(
+            kind: event.kind,
+            decisionCapability: capability,
+            key: event.sessionKey,
+            muted: MuteSettings.isMuted,
+            context: frontmost
+        )
+
+        if isGate {
+            // A blocking gate is the ONE deliberate auto-expand (it blocks a real
+            // agent). It surfaces regardless of the tap verdict; `reason` still
+            // powers the "why did this tap?" line.
+            let context = makeContext(fromEvent: event, capability: capability, reason: reason)
+            await present(context)
+        } else if tap {
+            // A non-decision tap is passive: it only pulses the pill — never drops
+            // the full console (silence-by-default, DESIGN §4.1/§8).
+            pulsePill()
         }
-        await show(context)
     }
 
     /// A passive, non-interruptive cue for a non-decision tap: pulse the pill and
     /// keep the ambient cockpit exactly as it is. Never auto-expands.
-    public func pulsePill() {
+    private func pulsePill() {
         model.pillPulse &+= 1
     }
 
@@ -162,17 +204,58 @@ public final class NotchController {
 
     // MARK: Private — building & showing reviews
 
-    private func makeContext(envelope: HookEnvelope, reason: String) -> ReviewContext {
-        let event = envelope.event
-        return ReviewContext(
-            id: envelope.id,
-            sessionId: event.sessionId,
-            cwd: event.cwd,
-            toolName: event.toolName,
-            command: event.commandDescription,
-            wantsDecision: envelope.wantsDecision,
+    /// Surface a blocking gate in the review console. A newer gate for a
+    /// *different* still-pending session queues behind the one on screen rather
+    /// than stranding the earlier decision.
+    private func present(_ context: ReviewContext) async {
+        guard let decisionID = context.decisionID, context.wantsDecision else {
+            // Defensive: a non-gate surfacing must never clobber a pending gate.
+            if let current = model.review, current.wantsDecision, isPending(current) { return }
+            await show(context)
+            return
+        }
+
+        // Track this gate app-side so queueing/dequeue-skipping works.
+        outstandingGates.insert(decisionID)
+
+        if let current = model.review,
+           current.wantsDecision,
+           current.id != context.id,
+           isPending(current) {
+            enqueueGate(context)
+            return
+        }
+        await show(context)
+    }
+
+    private func makeContext(fromEvent event: AgentEvent, capability: DecisionCapability, reason: String) -> ReviewContext {
+        ReviewContext(
+            id: event.sessionKey,
+            providerID: event.providerID,
+            decisionCapability: capability,
+            cwd: event.cwd ?? event.sessionKey.cwd,
+            toolName: event.payload["tool_name"]?.stringValue,
+            command: event.command,
+            decisionID: event.decision?.id,
             reason: reason,
-            outputTail: event.lastAssistantMessage
+            outputTail: event.payload["last_assistant_message"]?.stringValue ?? event.title
+        )
+    }
+
+    /// Builds a console context from a `Lane` snapshot, enriched from the last
+    /// event seen for that session (payload/last message the Lane doesn't carry).
+    private func makeContext(fromLane lane: Lane, reason: String) -> ReviewContext {
+        let latest = latestEvents[lane.id]
+        return ReviewContext(
+            id: lane.id,
+            providerID: lane.providerID,
+            decisionCapability: lane.decisionCapability,
+            cwd: lane.cwd,
+            toolName: latest?.payload["tool_name"]?.stringValue,
+            command: lane.lastCommand ?? latest?.command,
+            decisionID: lane.pendingDecision?.id,
+            reason: reason,
+            outputTail: latest?.payload["last_assistant_message"]?.stringValue ?? latest?.title
         )
     }
 
@@ -183,30 +266,36 @@ public final class NotchController {
         model.review = context
         model.waitingCount = pendingGates.count
         loadContext(for: context)
-        if context.wantsDecision {
-            armGateExpiry(for: context.id)
+        if let decisionID = context.decisionID, context.wantsDecision {
+            armGateExpiry(for: decisionID)
         }
         await expand()
     }
 
     private func enqueueGate(_ context: ReviewContext) {
-        guard context.wantsDecision,
-              model.review?.id != context.id,
-              !pendingGates.contains(where: { $0.id == context.id }),
+        guard let decisionID = context.decisionID,
+              model.review?.decisionID != decisionID,
+              !pendingGates.contains(where: { $0.decisionID == decisionID }),
               pendingGates.count < maxQueuedGates else { return }
         pendingGates.append(context)
         model.waitingCount = pendingGates.count
     }
 
-    /// Pops the next still-pending queued gate, skipping any that already
-    /// resolved or timed out in the broker.
-    private func dequeueNextGate() async -> ReviewContext? {
+    /// Pops the next still-pending queued gate, skipping any that already resolved
+    /// or timed out.
+    private func dequeueNextGate() -> ReviewContext? {
         while !pendingGates.isEmpty {
             let next = pendingGates.removeFirst()
             model.waitingCount = pendingGates.count
-            if await broker.isPending(next.id) { return next }
+            if isPending(next) { return next }
         }
         return nil
+    }
+
+    /// Whether a gate context is still awaiting the user app-side.
+    private func isPending(_ context: ReviewContext) -> Bool {
+        guard let decisionID = context.decisionID else { return false }
+        return outstandingGates.contains(decisionID)
     }
 
     // MARK: Private — expansion state machine
@@ -214,18 +303,14 @@ public final class NotchController {
     private func expandMostUrgent() async {
         if model.review == nil {
             guard let lane = mostUrgentLane() else { return }
-            let context = ReviewContext(
-                id: UUID(),
-                sessionId: lane.id,
-                cwd: lane.cwd,
-                toolName: nil,
-                command: lane.lastCommand,
-                wantsDecision: false,
-                reason: "summoned",
-                outputTail: nil
-            )
-            model.review = context
-            loadContext(for: context)
+            let context = makeContext(fromLane: lane, reason: "summoned")
+            // A summoned lane that happens to be a live gate must be tracked so it
+            // can be resolved / expired like any other gate.
+            if let decisionID = context.decisionID, context.wantsDecision {
+                outstandingGates.insert(decisionID)
+            }
+            await show(context)
+            return
         }
         await expand()
     }
@@ -262,10 +347,10 @@ public final class NotchController {
     /// decision gates are queued, surface the next one; otherwise settle to the
     /// cockpit / hidden.
     public func collapse() async {
-        cancelGateExpiry(for: model.review?.id)
+        cancelGateExpiry(for: model.review?.decisionID)
         model.review = nil
         model.isPinned = false
-        if let next = await dequeueNextGate() {
+        if let next = dequeueNextGate() {
             await show(next)
             return
         }
@@ -274,10 +359,10 @@ public final class NotchController {
 
     /// Idle auto-furl: drop the console back to the ambient cockpit WITHOUT
     /// draining the queue — an inactive user shouldn't get gate after gate
-    /// auto-popping (silence-by-default). Queued/pending gates stay in the broker
+    /// auto-popping (silence-by-default). Queued/pending gates stay outstanding
     /// and can be re-summoned; each still fails open on its own timeout.
     private func furl() async {
-        cancelGateExpiry(for: model.review?.id)
+        cancelGateExpiry(for: model.review?.decisionID)
         model.review = nil
         model.isPinned = false
         await settle()
@@ -312,14 +397,17 @@ public final class NotchController {
     }
 
     /// A shown/queued gate outlived its app-side lifetime. Disable its controls
-    /// (belt-and-suspenders — the broker also no-ops a stale resolve) and move on.
+    /// (belt-and-suspenders — a stale resolve is a no-op at the provider) and move
+    /// on. We deliberately do NOT resolve here: the adapter fails open on its own
+    /// timeout, which is the correct "defer to the agent's own prompt" behavior.
     private func expireGate(id: UUID) async {
         gateExpiryTasks[id] = nil
-        if let idx = pendingGates.firstIndex(where: { $0.id == id }) {
+        outstandingGates.remove(id)
+        if let idx = pendingGates.firstIndex(where: { $0.decisionID == id }) {
             pendingGates.remove(at: idx)
             model.waitingCount = pendingGates.count
         }
-        if model.review?.id == id {
+        if model.review?.decisionID == id {
             model.review?.isExpired = true
             await collapse()
         }
@@ -394,11 +482,12 @@ public final class NotchController {
 
     private func handleDecision(permission: PermissionDecision, reason: String?, redirect: String?) {
         guard let review = model.review else { return }
-        let id = review.id
-        if review.wantsDecision {
-            let message = DecisionMessage(id: id, permission: permission, reason: reason, redirect: redirect)
-            let broker = self.broker
-            Task { await broker.resolve(id: id, decision: message) }
+        if let decisionID = review.decisionID, review.wantsDecision {
+            outstandingGates.remove(decisionID)
+            cancelGateExpiry(for: decisionID)
+            let decision = AgentDecision(id: decisionID, verdict: permission, reason: reason, redirect: redirect)
+            let resolve = self.resolveDecision
+            Task { await resolve(decision) }
         }
         Task { await collapse() }
     }

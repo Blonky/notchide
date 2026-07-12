@@ -2,16 +2,26 @@ import SwiftUI
 import NotchideKit
 
 /// The read-only payload the review console renders for a single session.
+///
+/// Keyed by the lane's `SessionKey` (was a bare envelope UUID). The blocking
+/// decision, when present, correlates back to the provider via `decisionID`.
 public struct ReviewContext: Identifiable, Equatable {
-    /// The envelope UUID — the correlation key for the decision round-trip.
-    public let id: UUID
-    public let sessionId: String
+    /// The lane identity — the presentation/queue correlation key.
+    public let id: SessionKey
+    /// The provider that owns this lane (drives the provider badge).
+    public let providerID: ProviderID
+    /// Whether this provider's decisions may seize the user. Drives the console
+    /// branch: `.blocking` shows the decision row; `.notifyOnly` shows the quiet
+    /// capability banner instead.
+    public let decisionCapability: DecisionCapability
     public let cwd: String
+    /// The tool name from the underlying event, if any (header chip).
     public let toolName: String?
     /// The exact pending command / tool invocation, shown in full (never truncated).
     public let command: String?
-    /// Whether the blocked hook is actually awaiting a decision from us.
-    public let wantsDecision: Bool
+    /// Correlates the eventual `AgentDecision`; non-nil only for a live blocking
+    /// gate. `nil` for observe-only lanes or a summoned lane with no pending gate.
+    public let decisionID: UUID?
     /// The Suppressor's "why did this tap?" reason.
     public let reason: String
     /// A short tail of the agent's recent output, if available.
@@ -29,29 +39,41 @@ public struct ReviewContext: Identifiable, Equatable {
     public let destructiveTokens: [String]
     public var isDestructive: Bool { !destructiveTokens.isEmpty }
 
+    /// A blocking gate is actually awaiting a decision from us.
+    public var wantsDecision: Bool { decisionCapability == .blocking && decisionID != nil }
+    /// Whether to render allow/deny/ask buttons: a live blocking gate that has
+    /// not expired. Mirrors `Lane.showsDecisionButtons` plus app-side expiry.
+    public var showsDecisionButtons: Bool { wantsDecision && !isExpired }
+    /// An observe-only (`.notifyOnly`) lane: never shows decision buttons, shows a
+    /// quiet capability banner instead. (Gallery state 6.)
+    public var isObserveOnly: Bool { decisionCapability == .notifyOnly }
+
     /// A short, display-friendly agent id derived from the session id.
     public var shortSessionId: String {
-        sessionId.count > 8 ? String(sessionId.prefix(8)) : sessionId
+        let sid = id.agentSessionID
+        return sid.count > 8 ? String(sid.prefix(8)) : sid
     }
 
     public init(
-        id: UUID,
-        sessionId: String,
+        id: SessionKey,
+        providerID: ProviderID,
+        decisionCapability: DecisionCapability,
         cwd: String,
         toolName: String?,
         command: String?,
-        wantsDecision: Bool,
+        decisionID: UUID?,
         reason: String,
         outputTail: String?,
         branch: String? = nil,
         diff: GitDiff? = nil
     ) {
         self.id = id
-        self.sessionId = sessionId
+        self.providerID = providerID
+        self.decisionCapability = decisionCapability
         self.cwd = cwd
         self.toolName = toolName
         self.command = command
-        self.wantsDecision = wantsDecision
+        self.decisionID = decisionID
         self.reason = reason
         self.outputTail = outputTail
         self.branch = branch

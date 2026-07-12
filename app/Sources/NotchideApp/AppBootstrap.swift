@@ -4,33 +4,37 @@ import NotchideKit
 
 /// The application delegate — the one place everything is wired together.
 ///
-/// On launch it becomes an accessory (agent) app, boots the notch UI, starts the
-/// Unix-domain socket server, and connects the async decision round-trip:
+/// On launch it becomes an accessory (agent) app, boots the notch UI, and stands
+/// up the AAP provider model:
 ///
-///   notchide-hook ──envelope──▶ UnixSocketServer.handler
-///                                   │  await SessionStore.ingest        (lanes/glyphs)
-///                                   │  await Suppressor.shouldTap        (frontmost check)
-///                                   │  await NotchController.present     (surface it)
-///                                   │  await DecisionBroker.awaitDecision (if wantsDecision)
-///                                   ▼
-///   notchide-hook ◀──decision── (UI Approve/Deny/redirect → broker.resolve)
+///   adapter ──AAP frames──▶ SocketAAPProvider (owns socket + decision correlation)
+///                               │  events()  ──▶ SessionStore.ingest   (lanes/glyphs)
+///                               │            ──▶ NotchController.consider (Suppressor → surface)
+///                               ▼
+///   adapter ◀── decision ── SocketAAPProvider.resolve(AgentDecision)   (UI Approve/Deny/redirect)
 ///
-/// Non-decision events only update lanes/glyphs; a `wantsDecision` gate suspends
-/// in the broker until the user acts (or the timeout fails open).
+/// The provider now owns wire correlation (replacing the app's old
+/// DecisionBroker + UnixSocketServer handler wiring). We consume the provider's
+/// `events()` stream directly rather than `ProviderRegistry.fanIn(into:)` so each
+/// event can both update the store AND drive the capability-aware console — an
+/// `AsyncStream` has a single consumer, so the two cannot both drain it. The
+/// registry is still used for descriptors + on-disk manifests so lanes are
+/// classified by capability.
 @MainActor
 public final class NotchideAppDelegate: NSObject, NSApplicationDelegate {
     // Core (from NotchideKit) — all offline, dependency-free.
     private let store = SessionStore()
-    private let broker = DecisionBroker()
     private let suppressor = Suppressor()
     private let frontmost = AppKitFrontmostContext()
+    private let registry = ProviderRegistry()
 
     // App-side state + UI.
     private let model = NotchViewModel()
     private let remembered = RememberedStore()
     private var controller: NotchController?
-    private var server: UnixSocketServer?
+    private var socketProvider: SocketAAPProvider?
     private var lanesTask: Task<Void, Never>?
+    private var eventsTask: Task<Void, Never>?
 
     public override init() { super.init() }
 
@@ -38,25 +42,48 @@ public final class NotchideAppDelegate: NSObject, NSApplicationDelegate {
         // Agent app — no Dock icon, no menu bar presence.
         NSApp.setActivationPolicy(.accessory)
 
+        do {
+            try NotchidePaths.ensureSupportDirectory()
+        } catch {
+            NSLog("notchide: failed to prepare support directory: \(error)")
+        }
+
+        // The provider owns the AAP transport and decision correlation. Each
+        // connection's handshake registers that provider's decision capability
+        // with the store, so lanes are classified per the announced capabilities.
+        let store = self.store
+        let socketProvider = SocketAAPProvider(
+            onProviderAnnounced: { providerID, capability in
+                await store.register(providerID, decisionCapability: capability)
+            }
+        )
+        self.socketProvider = socketProvider
+
         let controller = NotchController(
             model: model,
-            broker: broker,
+            suppressor: suppressor,
+            frontmost: frontmost,
             diffProvider: GitDiffProvider(),
             terminalJumper: TerminalJumper(),
-            remembered: remembered
+            remembered: remembered,
+            // The one place the app hands a decision back to the agent: the
+            // provider writes it onto the correlated open connection.
+            resolveDecision: { [socketProvider] decision in
+                await socketProvider.resolve(decision)
+            }
         )
         self.controller = controller
         controller.start()
 
         observeLanes(into: controller)
-        startSocketServer(driving: controller)
+        bootProviders(socketProvider: socketProvider, driving: controller)
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
-        lanesTask?.cancel()
-        lanesTask = nil
+        lanesTask?.cancel(); lanesTask = nil
+        eventsTask?.cancel(); eventsTask = nil
         controller?.teardown()
-        server?.stop()
+        socketProvider?.stop()
     }
 
     /// Bridges `SessionStore`'s lane stream onto the `@MainActor` view model and
@@ -72,64 +99,43 @@ public final class NotchideAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Binds `hook.sock` and installs the handler that runs the full round-trip.
-    private func startSocketServer(driving controller: NotchController) {
+    /// Registers descriptors (built-in + on-disk manifests), starts the socket
+    /// transport, and fans the provider's events into the store + attention router.
+    private func bootProviders(socketProvider: SocketAAPProvider, driving controller: NotchController) {
         let store = self.store
-        let broker = self.broker
-        let suppressor = self.suppressor
-        let frontmost = self.frontmost
-        let remembered = self.remembered
+        let registry = self.registry
+        let providersDir = NotchidePaths.supportDirectory
+            .appendingPathComponent("providers", isDirectory: true)
 
-        let handler: UnixSocketServer.Handler = { envelope in
-            let event = envelope.event
-            let key = event.sessionId
-
-            // 1. Update lanes/glyphs (this drives the cockpit via the store stream).
-            await store.ingest(event)
-
-            // 2. Approve-and-remember fast path: a decision gate whose exact,
-            //    normalized command was previously remembered resolves .allow
-            //    immediately and silently — the console is never shown.
-            if envelope.wantsDecision,
-               let command = event.commandDescription,
-               await remembered.contains(command) {
-                return DecisionMessage(id: envelope.id, permission: .allow, reason: "remembered by notchide")
+        // Descriptors let the store classify a provider's lanes by capability even
+        // before any of its events arrive. `loadManifests` contributes on-disk
+        // provider descriptors (Swift can't dynamically load code, so a manifest
+        // only contributes its capability metadata, not a live provider).
+        Task {
+            await registry.register(socketProvider)
+            await registry.loadManifests(from: providersDir)
+            for descriptor in await registry.descriptors() {
+                await store.register(descriptor.id, decisionCapability: descriptor.decisionCapability)
             }
-
-            // 3. Attention routing: should this actually tap the user? (Global
-            //    mute is threaded through here — a muted user is never tapped.)
-            let (tap, reason) = await suppressor.shouldTap(
-                event: event, key: key, muted: MuteSettings.isMuted, context: frontmost
-            )
-
-            // 4. Surface. A `wantsDecision` PreToolUse gate is the ONE deliberate
-            //    auto-expand (it blocks a real agent). A non-decision "tap" is
-            //    passive: it only pulses the pill — never drops the full console
-            //    (silence-by-default, DESIGN §4.1/§8).
-            if envelope.wantsDecision {
-                await controller.present(envelope: envelope, reason: reason)
-            } else if tap {
-                await controller.pulsePill()
-            }
-
-            // 5. For a blocking gate, suspend until the human decides (or timeout).
-            //    The app-side timeout matches the sidecar's default so a
-            //    late-but-valid click is never dropped by the app expiring first.
-            if envelope.wantsDecision {
-                let timeout = Double(HookTimeout.defaultMilliseconds) / 1000.0
-                return await broker.awaitDecision(id: envelope.id, timeout: timeout)
-            }
-            return nil
         }
 
         do {
-            try NotchidePaths.ensureSupportDirectory()
-            let server = UnixSocketServer(handler: handler)
-            try server.start()
-            self.server = server
-            NSLog("notchide: listening on \(server.socketPath)")
+            try socketProvider.start()
+            NSLog("notchide: listening on \(socketProvider.socketPath)")
         } catch {
-            NSLog("notchide: failed to start socket server: \(error)")
+            NSLog("notchide: failed to start socket provider: \(error)")
+            return
+        }
+
+        // The single consumer of the provider's event stream: update lanes/glyphs
+        // (the store broadcast drives the cockpit via `observeLanes`) and route
+        // attention through the controller (Suppressor → auto-surface / pulse).
+        eventsTask = Task {
+            for await event in socketProvider.events() {
+                await store.ingest(event)
+                let capability = await store.decisionCapability(for: event.providerID)
+                await controller.consider(event: event, capability: capability)
+            }
         }
     }
 }
