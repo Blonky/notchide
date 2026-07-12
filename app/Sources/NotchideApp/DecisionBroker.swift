@@ -18,7 +18,14 @@ import NotchideKit
 public actor DecisionBroker {
     private var pending: [UUID: CheckedContinuation<DecisionMessage?, Never>] = [:]
 
-    public init() {}
+    /// Upper bound on concurrently-suspended gates. A misbehaving (or hostile)
+    /// same-user process could otherwise open unbounded connections and pin
+    /// unbounded continuations; past the cap we fail open (resolve `nil`).
+    private let maxPending: Int
+
+    public init(maxPending: Int = 64) {
+        self.maxPending = max(1, maxPending)
+    }
 
     /// Suspends until a decision for `id` is produced, or `timeout` elapses.
     public func awaitDecision(id: UUID, timeout: TimeInterval) async -> DecisionMessage? {
@@ -28,6 +35,17 @@ public actor DecisionBroker {
             await self?.resolve(id: id, decision: nil)
         }
         let decision = await withCheckedContinuation { (continuation: CheckedContinuation<DecisionMessage?, Never>) in
+            // A duplicate UUID must not orphan the first continuation (that would
+            // wedge the earlier hook forever). Fail the old one open first.
+            if let existing = pending.removeValue(forKey: id) {
+                existing.resume(returning: nil)
+            }
+            // Cap concurrent gates: past the ceiling, fail this one open rather
+            // than accumulate suspended continuations without bound.
+            guard pending.count < maxPending else {
+                continuation.resume(returning: nil)
+                return
+            }
             pending[id] = continuation
         }
         timeoutTask.cancel()

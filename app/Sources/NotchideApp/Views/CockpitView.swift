@@ -1,6 +1,30 @@
 import SwiftUI
 import NotchideKit
 
+/// The root view hosted in the notch's EXPANDED slot.
+///
+/// On notched Macs the ambient cockpit lives in the compact (trailing) slot and
+/// this expanded slot is used only for the review console. On floating screens
+/// (external monitors / non-notch Macs) there is no compact slot, so this root
+/// doubles as the persistent floating cockpit: it renders the console when a
+/// review is on screen and the compact cockpit otherwise. See
+/// `NotchController.showCockpit`.
+public struct NotchRootView: View {
+    @ObservedObject var model: NotchViewModel
+
+    public init(model: NotchViewModel) {
+        self.model = model
+    }
+
+    public var body: some View {
+        if model.review != nil {
+            ReviewConsoleView(model: model)
+        } else {
+            CockpitView(model: model)
+        }
+    }
+}
+
 /// The collapsed cockpit: a row of pre-attentive dots, one per active lane.
 ///
 /// No text — state is read entirely through color + motion, so it registers in
@@ -8,6 +32,7 @@ import NotchideKit
 /// the notch.
 public struct CockpitView: View {
     @ObservedObject var model: NotchViewModel
+    @State private var pulseGlow: Double = 0
 
     public init(model: NotchViewModel) {
         self.model = model
@@ -23,6 +48,17 @@ public struct CockpitView: View {
         .padding(.vertical, Theme.Spacing.sm)
         .frame(height: 28)
         .fixedSize()
+        // Passive pulse: a non-decision tap briefly haloes the pill instead of
+        // auto-expanding it (silence-by-default). Driven by `model.pillPulse`.
+        .background(
+            Capsule()
+                .fill(Theme.needsYou.opacity(0.22 * pulseGlow))
+                .blur(radius: 6)
+        )
+        .onChange(of: model.pillPulse) { _ in
+            pulseGlow = 1
+            withAnimation(.easeOut(duration: 0.9)) { pulseGlow = 0 }
+        }
     }
 }
 

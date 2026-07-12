@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 
 /// The global summon hotkey + ESC handling.
 ///
@@ -9,10 +10,13 @@ import AppKit
 ///     (⌘⌥N by default),
 ///   • a LOCAL monitor handles ESC to furl the console when notchide is frontmost.
 ///
-/// NOTE: `NSEvent` global monitors require the app to be trusted for Accessibility
-/// on some macOS versions; the app requests that at runtime. If not yet granted,
-/// the summon hotkey is simply inert until the user approves it (the rest of the
-/// UI — hover-intent, tap-to-expand — still works).
+/// NOTE: `NSEvent` GLOBAL monitors require the app to be trusted for Accessibility.
+/// The app never had a way to request this, so `start()` now actively checks
+/// `AXIsProcessTrusted()` and, if untrusted, calls
+/// `AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt: true])` to surface
+/// the system prompt (this does not block). Until the user grants it, the global
+/// summon hotkey is simply inert — the rest of the UI (hover-intent, ESC while
+/// frontmost, tap-to-expand) still works, since the LOCAL monitor needs no trust.
 @MainActor
 public final class HotkeyMonitor {
     /// keyCode 45 == "n".
@@ -28,18 +32,32 @@ public final class HotkeyMonitor {
     public init() {}
 
     public func start() {
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { event in
+        // Global NSEvent monitors need Accessibility trust; surface the system
+        // prompt once if we don't have it yet (non-blocking).
+        requestAccessibilityTrustIfNeeded()
+
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             MainActor.assumeIsolated {
                 // Global monitor: only the summon combo is relevant.
-                self.handleKeyDown(event, allowEscape: false)
+                self?.handleKeyDown(event, allowEscape: false)
             }
         }
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event -> NSEvent? in
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event -> NSEvent? in
             MainActor.assumeIsolated {
-                self.handleKeyDown(event, allowEscape: true)
+                self?.handleKeyDown(event, allowEscape: true)
             }
             return event
         }
+    }
+
+    /// Prompts for Accessibility trust the first time if it is not yet granted.
+    /// No-op once trusted; never blocks (the OS shows its own settings prompt).
+    private func requestAccessibilityTrustIfNeeded() {
+        guard !AXIsProcessTrusted() else { return }
+        // Use the documented key's string value directly; referencing the global
+        // `kAXTrustedCheckOptionPrompt` var is not concurrency-safe under Swift 6.
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
     }
 
     public func stop() {

@@ -46,6 +46,11 @@ public struct DiffView: View {
 private struct DiffFileView: View {
     let file: DiffFile
 
+    /// v0.1 highlighting is Swift-only; other files render as plain mono.
+    private var language: SwiftSyntaxHighlighter.Language {
+        SwiftSyntaxHighlighter.language(forPath: file.displayName)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // File header with +/- counts.
@@ -80,7 +85,7 @@ private struct DiffFileView: View {
                     .background(Theme.diffGutter)
 
                 ForEach(hunk.lines) { line in
-                    DiffLineView(line: line)
+                    DiffLineView(line: line, language: language)
                 }
             }
         }
@@ -95,6 +100,7 @@ private struct DiffFileView: View {
 
 private struct DiffLineView: View {
     let line: DiffLine
+    let language: SwiftSyntaxHighlighter.Language
 
     private var background: Color {
         switch line.kind {
@@ -137,7 +143,7 @@ private struct DiffLineView: View {
                 .foregroundStyle(signColor)
                 .frame(width: 8, alignment: .center)
 
-            Text(SwiftSyntaxHighlighter.highlight(line.text))
+            Text(SwiftSyntaxHighlighter.highlight(line.text, language: language))
                 .font(Typo.monoSmall)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)

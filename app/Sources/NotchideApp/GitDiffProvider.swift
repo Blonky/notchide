@@ -65,20 +65,46 @@ public struct GitDiffProvider: Sendable {
     }
 
     /// Combined unstaged + staged diff for the working tree at `cwd`.
+    ///
+    /// The `cwd` is agent/attacker-controlled, so this path is deliberately
+    /// hardened (see `run`): the environment neutralizes user/system/repo git
+    /// config, and the diff itself disables ext-diff / textconv drivers. Callers
+    /// invoke this only when the review console is actually being shown — never
+    /// as an automatic side effect of merely receiving a gate.
     public func loadDiff(cwd: String) async -> GitDiff {
         guard !cwd.isEmpty else { return .empty }
-        let unstaged = await Self.run(["diff"], cwd: cwd) ?? ""
-        let staged = await Self.run(["diff", "--staged"], cwd: cwd) ?? ""
+        // Confirm this is a real work tree first, under the same hardened env, so
+        // we never run diff machinery outside a checkout.
+        guard await Self.isInsideWorkTree(cwd: cwd) else { return .empty }
+        let diffArgs = ["diff", "--no-color", "--no-textconv", "--no-ext-diff"]
+        let unstaged = await Self.run(diffArgs, cwd: cwd) ?? ""
+        let staged = await Self.run(diffArgs + ["--staged"], cwd: cwd) ?? ""
         let combined = [unstaged, staged].filter { !$0.isEmpty }.joined(separator: "\n")
         return DiffParser.parse(combined)
     }
 
+    /// Whether `cwd` is inside a git work tree, checked under the hardened env.
+    private static func isInsideWorkTree(cwd: String) async -> Bool {
+        let out = await run(["rev-parse", "--is-inside-work-tree"], cwd: cwd)
+        return out?.trimmingCharacters(in: .whitespacesAndNewlines) == "true"
+    }
+
     /// Runs `git -C <cwd> <args>` off the main thread and returns stdout.
+    ///
+    /// SECURITY: auto-running `git` in an agent/attacker-controlled `cwd` would
+    /// otherwise execute repo-configured code — `core.pager`, `core.fsmonitor`,
+    /// and ext-diff / textconv drivers all run arbitrary programs with no user
+    /// interaction, defeating the permission gate. We defang that here:
+    ///   • the environment points `GIT_CONFIG_SYSTEM` / `GIT_CONFIG_GLOBAL` at
+    ///     `/dev/null`, sets `GIT_OPTIONAL_LOCKS=0` and `GIT_TERMINAL_PROMPT=0`,
+    ///   • the invocation forces `--no-optional-locks -c core.fsmonitor=` and the
+    ///     diff callers additionally pass `--no-textconv --no-ext-diff`.
     private static func run(_ args: [String], cwd: String) async -> String? {
         await Task.detached(priority: .utility) {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["git", "-C", cwd] + args
+            process.arguments = ["git", "-C", cwd, "--no-optional-locks", "-c", "core.fsmonitor="] + args
+            process.environment = hardenedGitEnvironment()
             let out = Pipe()
             let err = Pipe()
             process.standardOutput = out
@@ -93,6 +119,17 @@ public struct GitDiffProvider: Sendable {
             guard process.terminationStatus == 0 else { return nil }
             return String(decoding: data, as: UTF8.self)
         }.value
+    }
+
+    /// The current environment with git config sources neutralized, so no
+    /// user/system/repo config can inject a pager, fsmonitor, or diff driver.
+    private static func hardenedGitEnvironment() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        env["GIT_CONFIG_SYSTEM"] = "/dev/null"
+        env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+        env["GIT_OPTIONAL_LOCKS"] = "0"
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        return env
     }
 }
 

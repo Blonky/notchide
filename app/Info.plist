@@ -33,12 +33,15 @@
     <string>notchide — MIT License</string>
 
     <!-- Accessibility / automation usage notes.
-         notchide's "jump to terminal" uses AppleScript (Apple Events) to activate
-         your agent's terminal. The global summon hotkey uses an NSEvent global
-         monitor, which macOS gates behind the Accessibility (AXIsProcessTrusted)
-         permission — the OS prompts for that at runtime; there is no Info.plist
-         key for it. Precise per-window / per-Space detection (a later milestone)
-         will also require Accessibility. -->
+         notchide's "jump to terminal" activates a running terminal (or launches
+         Terminal.app via `/usr/bin/open` — no Apple Events / shell). The global
+         summon hotkey uses an NSEvent global monitor, which macOS gates behind
+         the Accessibility (AXIsProcessTrusted) permission. There is no Info.plist
+         key for Accessibility; the app now proactively requests it at runtime via
+         AXIsProcessTrustedWithOptions(kAXTrustedCheckOptionPrompt) on startup, so
+         macOS surfaces the grant prompt. Precise per-window / per-Space detection
+         (a later milestone) will also require Accessibility. The Apple Events
+         usage string below is retained for any future scripted-activation path. -->
     <key>NSAppleEventsUsageDescription</key>
     <string>notchide can activate your agent's terminal (Terminal, iTerm2, Ghostty, …) so you can jump to it from the review console.</string>
 </dict>

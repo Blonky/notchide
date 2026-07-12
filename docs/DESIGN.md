@@ -164,6 +164,10 @@ Four layers. Data flows up (events) and the decision flows back down the same op
 - **Depends on:** for the diff, the **planned** highlighting stack — **Neon** + **SwiftTreeSitter**
   (BSD-3) + **CodeEditLanguages** (MIT). These are stable, individually-versioned libraries —
   **not** a pre-1.0 editor. notchide uses them to *highlight* a diff, never to edit.
+- **v0.1 highlighting is Swift-only.** Until the Neon milestone lands, the diff uses a small,
+  dependency-free Swift keyword highlighter. Its rules are Swift-specific, so a **non-Swift file
+  falls back to plain monospace** rather than being mis-highlighted; multi-language tree-sitter
+  highlighting arrives with the stack above.
 
 ---
 
@@ -237,6 +241,14 @@ against it.
 window on the active Space.** If the agent's terminal is already right in front of you, you can
 see the permission prompt yourself — notchide stays silent and lets Claude Code's own prompt do
 its job.
+
+> **v0.1 scope — coarse suppression.** The shipped check is deliberately coarse: it treats a
+> session as "visible" when **any known terminal emulator is the frontmost application**, not
+> per-window or per-Space. It does not yet match the *specific* session's window (by title /
+> cwd) or confirm it is on the active Space — that needs the Accessibility API and
+> SkyLight/`CGSSpace` and is a later milestone (§10). Consequently, if you have any terminal
+> frontmost, notchide stays silent even about a *different* hidden session; the precise
+> per-window/per-Space policy above is the v1.0 target.
 
 - The check runs through `FrontmostContextProviding`, so the "is this session visible?" question
   is a pure, testable predicate rather than desktop-coupled logic.

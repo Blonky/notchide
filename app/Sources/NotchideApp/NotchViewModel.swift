@@ -17,6 +17,10 @@ public struct ReviewContext: Identifiable, Equatable {
     /// A short tail of the agent's recent output, if available.
     public let outputTail: String?
 
+    /// Set once the gate has timed out / been dropped app-side. Disables the
+    /// decision controls so a stale click can't "decide" something already gone.
+    public var isExpired: Bool = false
+
     // Filled in asynchronously after the console is already on screen.
     public var branch: String?
     public var diff: GitDiff?
@@ -69,12 +73,23 @@ public final class NotchViewModel: ObservableObject {
     @Published public var review: ReviewContext?
     /// Whether the user pinned the console open (suspends auto-collapse).
     @Published public var isPinned: Bool = false
+    /// Number of additional decision gates queued behind the one on screen.
+    @Published public var waitingCount: Int = 0
+    /// Bumped to trigger a subtle passive pulse of the collapsed pill (a
+    /// non-decision tap pulses; it never auto-expands).
+    @Published public var pillPulse: Int = 0
+    /// Global mute. Persisted; when set, the Suppressor never taps the user.
+    @Published public var muted: Bool = MuteSettings.isMuted {
+        didSet { MuteSettings.set(muted) }
+    }
 
     // Callbacks wired by NotchController. Kept as closures so the views never
     // reach across into the actor/socket machinery directly.
 
     /// (permission, reason, redirect) — the user's decision on the pending gate.
     public var onDecide: ((PermissionDecision, String?, String?) -> Void)?
+    /// Approve the pending command AND remember it for future auto-approval.
+    public var onApproveRemember: (() -> Void)?
     /// Collapse the console back to the cockpit.
     public var onCollapse: (() -> Void)?
     /// Toggle the pinned state.
@@ -83,4 +98,21 @@ public final class NotchViewModel: ObservableObject {
     public var onJumpToTerminal: ((String) -> Void)?
 
     public init() {}
+}
+
+/// The single persisted source of truth for the global mute toggle.
+///
+/// Backed by `UserDefaults` so it is readable off the main actor (the socket
+/// handler needs the current value per event) without capturing the `@MainActor`
+/// view model in a `@Sendable` closure.
+public enum MuteSettings {
+    private static let key = "notchide.globalMute"
+
+    public static var isMuted: Bool {
+        UserDefaults.standard.bool(forKey: key)
+    }
+
+    public static func set(_ value: Bool) {
+        UserDefaults.standard.set(value, forKey: key)
+    }
 }

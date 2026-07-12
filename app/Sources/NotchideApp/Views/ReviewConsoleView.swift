@@ -30,7 +30,10 @@ public struct ReviewConsoleView: View {
             DecisionHeaderView(
                 review: review,
                 isPinned: model.isPinned,
+                isMuted: model.muted,
+                waitingCount: model.waitingCount,
                 onTogglePin: { model.onTogglePin?() },
+                onToggleMute: { model.muted.toggle() },
                 onJumpToTerminal: { model.onJumpToTerminal?(review.cwd) },
                 onClose: { model.onCollapse?() }
             )
@@ -45,12 +48,14 @@ public struct ReviewConsoleView: View {
             }
 
             ActionBarView(
-                enabled: review.wantsDecision,
+                // A timed-out / dropped gate disables its controls so a stale
+                // click can't "decide" something already gone.
+                enabled: review.wantsDecision && !review.isExpired,
                 isDestructive: review.isDestructive,
                 redirectText: $redirectText,
                 onDeny: { model.onDecide?(.deny, "Denied from notchide", nil) },
                 onApprove: { model.onDecide?(.allow, nil, nil) },
-                onApproveRemember: { model.onDecide?(.allow, "approve-and-remember", nil) },
+                onApproveRemember: { model.onApproveRemember?() },
                 onRedirect: {
                     let text = redirectText.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !text.isEmpty else { return }
@@ -85,7 +90,10 @@ public struct ReviewConsoleView: View {
 private struct DecisionHeaderView: View {
     let review: ReviewContext
     let isPinned: Bool
+    let isMuted: Bool
+    let waitingCount: Int
     let onTogglePin: () -> Void
+    let onToggleMute: () -> Void
     let onJumpToTerminal: () -> Void
     let onClose: () -> Void
 
@@ -98,9 +106,13 @@ private struct DecisionHeaderView: View {
             if let tool = review.toolName {
                 ContextChip(icon: "wrench.and.screwdriver", text: tool)
             }
+            if waitingCount > 0 {
+                ContextChip(icon: "square.stack.3d.up", text: "\(waitingCount) more waiting")
+            }
 
             Spacer(minLength: Theme.Spacing.sm)
 
+            IconButton(system: isMuted ? "bell.slash.fill" : "bell", active: isMuted, action: onToggleMute)
             IconButton(system: isPinned ? "pin.fill" : "pin", active: isPinned, action: onTogglePin)
             IconButton(system: "terminal", active: false, action: onJumpToTerminal)
             IconButton(system: "xmark", active: false, action: onClose)
@@ -168,13 +180,16 @@ private struct CommandBlockView: View {
                     .tracking(0.8)
                     .foregroundStyle(Theme.textTertiary)
                 if review.isDestructive {
-                    Text("destructive")
+                    // Best-effort heuristic, NOT a safety guarantee — the wording
+                    // must read as advisory ("possibly"), never as a verdict.
+                    Text("possibly destructive")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Theme.error)
                         .padding(.horizontal, Theme.Spacing.sm)
                         .padding(.vertical, 2)
                         .background(Theme.diffRemoveBackground)
                         .clipShape(Capsule())
+                        .help("A shallow heuristic flagged tokens that are often destructive. Always read the full command — this is advisory only, not a safety check.")
                 }
                 Spacer()
             }

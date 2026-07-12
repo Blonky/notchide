@@ -5,13 +5,34 @@ import Foundation
 ///
 /// It runs a handful of regexes over one line and paints keywords, capitalized
 /// types, numbers, string literals, and comments. It is deliberately shallow —
-/// good enough to make a diff readable at a glance.
+/// good enough to make a Swift diff readable at a glance.
 ///
-/// TODO: The planned upgrade is real tree-sitter highlighting via Neon +
-/// SwiftTreeSitter (+ CodeEditLanguages), per docs/DESIGN.md §5.4. Those deps
-/// are intentionally NOT added here so the app resolves and compiles reliably;
-/// swap this file for the Neon-backed highlighter once that milestone lands.
+/// SCOPE (v0.1): highlighting is **Swift-only**. Its rules (Swift keyword set,
+/// `//` `/* */` comments, `"…"` strings) would mis-color other languages, so any
+/// non-Swift file falls back to plain mono via ``highlight(_:language:)``. Real
+/// multi-language tree-sitter highlighting (Neon + SwiftTreeSitter +
+/// CodeEditLanguages, docs/DESIGN.md §5.4) is a later milestone; those deps are
+/// intentionally NOT added here so the app resolves and compiles reliably.
 public enum SwiftSyntaxHighlighter {
+
+    /// The language a diff line belongs to, for highlighter scoping.
+    public enum Language: Equatable {
+        case swift
+        /// Any other language — rendered as plain mono in v0.1.
+        case other
+    }
+
+    /// Classifies a file path into a highlighter language by extension.
+    public static func language(forPath path: String) -> Language {
+        path.lowercased().hasSuffix(".swift") ? .swift : .other
+    }
+
+    /// Highlights a line only when it belongs to a Swift file; every other
+    /// language renders as plain mono so we never mis-highlight it.
+    public static func highlight(_ line: String, language: Language) -> AttributedString {
+        guard language == .swift else { return AttributedString(line) }
+        return highlight(line)
+    }
 
     private static let keywords: Set<String> = [
         "associatedtype", "class", "deinit", "enum", "extension", "fileprivate",

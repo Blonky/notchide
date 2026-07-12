@@ -44,8 +44,12 @@ public struct AppKitFrontmostContext: FrontmostContextProviding {
 /// Best-effort "jump to terminal" escape hatch.
 ///
 /// Activates a running terminal emulator if one exists, otherwise falls back to
-/// launching Terminal.app (optionally `cd`-ing to the lane's working directory)
-/// via `osascript`. Kept free of ScriptingBridge headers so it compiles cleanly.
+/// launching Terminal.app at the lane's working directory.
+///
+/// SECURITY: `cwd` is agent/attacker-controlled, so it must never reach a shell.
+/// The fallback launches `/usr/bin/open -a Terminal <cwd>` via `Process`, where
+/// `cwd` is a separate argv element — no `osascript` / `do script` string
+/// interpolation, so a crafted cwd cannot inject a command.
 public struct TerminalJumper: Sendable {
     public init() {}
 
@@ -58,18 +62,13 @@ public struct TerminalJumper: Sendable {
             app.activate(options: [.activateIgnoringOtherApps])
             return
         }
-        // Fallback: open Terminal.app at cwd via AppleScript, off the main thread.
-        let safeCwd = cwd.replacingOccurrences(of: "\"", with: "\\\"")
-        let script: String
-        if safeCwd.isEmpty {
-            script = "tell application \"Terminal\" to activate"
-        } else {
-            script = "tell application \"Terminal\"\nactivate\ndo script \"cd \\\"\(safeCwd)\\\"\"\nend tell"
-        }
+        // Fallback: open Terminal.app (at cwd if we have one) with no shell. `cwd`
+        // is passed as its own argv element, so it is never interpreted.
+        let arguments = cwd.isEmpty ? ["-a", "Terminal"] : ["-a", "Terminal", cwd]
         Task.detached(priority: .userInitiated) {
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-            process.arguments = ["-e", script]
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            process.arguments = arguments
             try? process.run()
         }
     }
