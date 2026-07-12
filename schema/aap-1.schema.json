@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Blonky/notchide/schema/aap-1.schema.json",
+  "title": "AAP v1 wire frames",
+  "description": "JSON Schema for the three Agent Adapter Protocol (aap/1) NDJSON frame types: the handshake and envelope (adapter -> app), and the decision (app -> adapter). Each frame is one JSON object on one newline-terminated line. Decoders in NotchideKit are lenient (unknown fields ignored, most missing fields defaulted); this schema documents a conformant frame. See docs/PROTOCOL.md.",
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "capability": {
+      "type": "string",
+      "enum": ["observe", "gate", "actuate"],
+      "description": "observe: read-only status. gate: block the agent awaiting a decision. actuate: accept actions back (reserved)."
+    },
+    "eventKind": {
+      "type": "string",
+      "enum": ["started", "progress", "needsDecision", "notified", "finished", "errored"],
+      "description": "Maps onto the fixed four-state lane/glyph model. An unknown/absent kind degrades to 'errored'."
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["allow", "deny", "ask"],
+      "description": "allow approves, deny blocks, ask defers to the agent's own permission prompt. Deferring entirely is expressed by sending no decision frame at all."
+    },
+    "handshake": {
+      "type": "object",
+      "title": "AAP handshake (adapter -> app, first line on every connection)",
+      "properties": {
+        "aap": {
+          "const": "1",
+          "description": "Wire version. MUST be \"1\"; any other value causes the app to close the connection."
+        },
+        "providerID": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable reverse-DNS provider identity, e.g. \"sh.claude\"."
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/capability" },
+          "uniqueItems": true,
+          "description": "Announced capabilities. Unknown strings are dropped by the app; encoded sorted, order not significant."
+        }
+      },
+      "required": ["aap", "providerID", "capabilities"],
+      "additionalProperties": true
+    },
+    "decisionRequest": {
+      "type": "object",
+      "title": "Decision request (carried on a needsDecision event)",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid",
+          "description": "Correlation id; typically equal to the envelope id. MUST be a valid UUID or the app decodes the event with no decision."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "Human-readable description of what is being gated (e.g. the command)."
+        }
+      },
+      "required": ["id", "prompt"],
+      "additionalProperties": true
+    },
+    "agentEvent": {
+      "type": "object",
+      "title": "AgentEvent (the 'event' field of an envelope)",
+      "properties": {
+        "providerID": {
+          "type": "string",
+          "description": "Originating provider, e.g. \"sh.claude\". Defaults to \"\" if absent."
+        },
+        "agentSessionID": {
+          "type": "string",
+          "description": "Vendor session id. The app forms the lane key from (providerID, agentSessionID, cwd). Defaults to \"\"."
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Working directory. Defaults to \"\"."
+        },
+        "kind": { "$ref": "#/$defs/eventKind" },
+        "title": {
+          "type": "string",
+          "description": "Optional short label. Omitted (not null) when absent."
+        },
+        "command": {
+          "type": "string",
+          "description": "Optional human-readable command. Omitted when absent."
+        },
+        "decision": {
+          "$ref": "#/$defs/decisionRequest",
+          "description": "Present if and only if kind == needsDecision; omitted otherwise."
+        },
+        "payload": {
+          "type": "object",
+          "description": "The full original vendor payload, preserved losslessly. Defaults to {}.",
+          "additionalProperties": true
+        },
+        "at": {
+          "type": "number",
+          "description": "Event time as epoch seconds (may be fractional). Defaults to 0."
+        }
+      },
+      "required": ["providerID", "agentSessionID", "cwd", "kind", "payload", "at"],
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "$comment": "decision is present iff kind == needsDecision.",
+          "if": { "properties": { "kind": { "const": "needsDecision" } }, "required": ["kind"] },
+          "then": { "required": ["decision"] },
+          "else": { "not": { "required": ["decision"] } }
+        }
+      ]
+    },
+    "envelope": {
+      "type": "object",
+      "title": "AgentEnvelope (adapter -> app)",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid",
+          "description": "Correlation id; the decision frame echoes it."
+        },
+        "event": { "$ref": "#/$defs/agentEvent" },
+        "wantsDecision": {
+          "type": "boolean",
+          "description": "true only when a gate adapter is blocking on a decision for this frame (a needsDecision event)."
+        }
+      },
+      "required": ["id", "event", "wantsDecision"],
+      "additionalProperties": true
+    },
+    "decision": {
+      "type": "object",
+      "title": "AgentDecision (app -> adapter, gate only)",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid",
+          "description": "Echoes the originating envelope id / decision.id."
+        },
+        "verdict": { "$ref": "#/$defs/verdict" },
+        "reason": {
+          "type": ["string", "null"],
+          "description": "Optional human-readable rationale. Omitted (not null) when absent by the reference encoder; null is also accepted on decode."
+        },
+        "redirect": {
+          "type": ["string", "null"],
+          "description": "Optional app-level steer. Never forwarded into a vendor's own decision output. Omitted when absent."
+        }
+      },
+      "required": ["id", "verdict"],
+      "additionalProperties": true
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/handshake" },
+    { "$ref": "#/$defs/envelope" },
+    { "$ref": "#/$defs/decision" }
+  ]
+}

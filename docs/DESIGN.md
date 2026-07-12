@@ -10,10 +10,10 @@
 
 ## 1. Problem & thesis
 
-Developers now run several AI coding agents at once — a Claude Code session per worktree, per
-feature, per Space. The agents are mostly autonomous, but they are not fully autonomous: they
-stop at permission gates ("may I run `rm`?", "may I edit this file?"). Each gate is a small,
-blocking, human-in-the-loop decision.
+Developers now run several AI coding agents at once — a Claude Code session per worktree, a
+Codex run here, a Cursor agent there, one per feature, per Space. The agents are mostly
+autonomous, but they are not fully autonomous: they stop at permission gates ("may I run `rm`?",
+"may I edit this file?"). Each gate is a small, blocking, human-in-the-loop decision.
 
 The problem is **attention routing**, not code. When you are heads-down in a fullscreen app on
 one Space, an agent blocked on a permission three Spaces away is invisible. You either:
@@ -36,6 +36,27 @@ notchide is **one object in two states**:
 
 It does exactly two verbs — **NOTIFY** and **DECIDE** — and deliberately never the third,
 **CREATE**.
+
+### 1.1 An open platform, not a single-agent tool
+
+notchide is **the open notch platform for coding agents**. Two commitments follow from that:
+
+- **Agent-agnostic by construction.** The cockpit consumes one vendor-neutral currency — an
+  `AgentEvent` tagged with a `providerID` — over a small, documented wire protocol: **AAP, the
+  Agent Adapter Protocol** ([PROTOCOL.md](PROTOCOL.md)). Claude Code is the *reference adapter*
+  that ships in v0.1, not a special case baked into the core. Connect Codex, Cursor, Aider, or
+  your own agent by speaking AAP; nothing in the lane/glyph/decision model is Claude-specific.
+- **Standalone _and_ build-on.** notchide works out of the box as a finished product for Claude
+  Code today, and it is a substrate others extend: drop a provider manifest, or write an adapter
+  in any language. See [ARCHITECTURE.md](ARCHITECTURE.md) for the two planes (AAP wire protocol +
+  provider/contribution surface) and the provider tiers.
+- **Local-first.** The whole platform is a same-machine, owner-only Unix socket (`0600`); notchide
+  binds nothing routable. A contributed decision can approve `rm -rf`, so the channel that
+  carries it is, by construction, unreachable off the machine (see §6.2, [PROTOCOL.md §3.1](PROTOCOL.md#31-local-first-security-requirements-normative)).
+
+The visual language for all of this — the four-state glyphs, the console, the diff and tail — is
+captured in the display-system reference at
+[`docs/media/gallery.html`](media/gallery.html).
 
 ---
 
@@ -119,6 +140,21 @@ Plus a **jump-to-terminal** escape hatch (AppleScript / Accessibility) for anyth
 can't answer. Once you decide, the decision travels back down the still-open socket and the
 console furls back up.
 
+### 4.3 Capability-aware console — GATE vs OBSERVE-only
+
+Because notchide is a platform, not every connected agent can be gated. The console adapts to
+each provider's advertised **capabilities** (see [PROTOCOL.md §2](PROTOCOL.md#2-capability-model)):
+
+- A **`gate`** provider (like Claude Code) is *blocking*: its sessions can reach `needs-you`, the
+  console shows **Approve / Deny / Approve-and-remember / redirect**, and a decision is written
+  back over the socket.
+- An **observe-only** provider is *notify-only* and **degraded** in the console: it appears as a
+  lane and glyphs `flowing`/`done`/`error`, but it can **never** reach `needs-you` and shows **no
+  decision buttons**. This is a type-level guarantee, not a UI preference — a notify-only provider
+  is structurally unable to seize the user (`SessionStore` clamps its state; `Suppressor` never
+  taps for it; `Lane.showsDecisionButtons` requires a blocking provider). The v0.2 OTLP listener
+  is exactly such a provider: it proves the abstraction by observing without ever gating.
+
 ---
 
 ## 5. Architecture
@@ -138,12 +174,15 @@ Four layers. Data flows up (events) and the decision flows back down the same op
 
 ### 5.2 Ingest
 
-- **Responsibility:** get Claude Code hook events into the app reliably and cheaply, and carry a
-  decision back to the blocked hook.
-- **Key types:** the `notchide-hook` sidecar CLI (installed into Claude Code's hooks); a
-  `UnixSocketServer` inside the app; the `SessionStore` actor with **one lane per session**.
-- **Transport:** a Unix-domain socket at `~/Library/Application Support/notchide/hook.sock`,
-  mode `0600`, NDJSON framing (see [ARCHITECTURE.md](ARCHITECTURE.md)).
+- **Responsibility:** get **any** agent's events into the app reliably and cheaply over AAP, and
+  carry a decision back to a blocked gate.
+- **Key types:** `SocketAAPProvider` (the app-side ingress, wrapping `UnixSocketServer`);
+  `ProviderRegistry`, which fans every provider's events into the one `SessionStore` (`actor`,
+  one lane per `SessionKey`); `ClaudeCodeProvider`, the **reference provider** that translates
+  Claude hook events into vendor-neutral `AgentEvent`s. The `notchide-hook` CLI is the reference
+  *adapter* on the wire.
+- **Transport:** a Unix-domain socket at `~/Library/Application Support/notchide/agent.sock`,
+  mode `0600`, NDJSON framing — the normative [AAP protocol](PROTOCOL.md).
 - **Depends on:** nothing external — this whole path is in the dependency-free core so it builds
   and tests offline.
 
@@ -181,7 +220,7 @@ When Claude Code hits a permission gate, its `PreToolUse` hook runs `notchide-ho
 process:
 
 1. Reads the hook payload (`session_id`, `tool_name`, `tool_input`, `cwd`, …) from stdin.
-2. Connects to `hook.sock` and sends an **envelope** carrying that payload plus a fresh request
+2. Connects to `agent.sock` and sends an **envelope** carrying that payload plus a fresh request
    UUID.
 3. **Blocks**, synchronously awaiting a **decision** for that UUID — this is what makes the
    agent actually wait for the human.
@@ -268,7 +307,7 @@ conservative default of not interrupting when in doubt about visibility.
 The end-to-end path for one blocked permission:
 
 1. Claude Code hits a permission gate and runs `notchide-hook`.
-2. The sidecar sends an envelope over `hook.sock` and blocks awaiting a decision.
+2. The sidecar sends an envelope over `agent.sock` and blocks awaiting a decision.
 3. `SessionStore` routes it to that session's lane; the lane flips to `needs-you`.
 4. `Suppressor` checks frontmost on the active Space. If the terminal is hidden, the pill
    **pulses amber** with a subtle tap (sound opt-in); if visible, notchide stays silent.
@@ -337,7 +376,7 @@ floating pill / a normal always-on-top panel) rather than crashing.
 | **Synchronous-hook coupling.** Blocking `PreToolUse` on notchide could hang the agent. | **Fail-open** (§6.2): hard timeout, exit `0`, defer to Claude Code's normal prompt. notchide is never load-bearing. |
 | **Security-sensitive write path.** Approving a command the user didn't fully read is dangerous. | Conservative write path (§9): full command always shown, explicit click required, **default-to-Deny** on ambiguity, **never auto-approve** except explicit per-exact-command remembering (§12). |
 | **Private-framework fragility.** SkyLight / `CGSSpace` are undocumented and can change across macOS releases. | Feature-detect at runtime and **degrade** (floating pill / plain always-on-top) rather than crash; prove notarization at t=0 (§10); harden feature-detection across point releases by v1.0. |
-| **Single-vendor coupling.** v0.1 is Claude-Code-only. | Deliberate wedge. v0.2 adds a passive OTLP listener (multi-agent); v1.0 documents a local-socket plugin protocol + community adapters. The core is designed around a generic lane/decision model, not Claude-specific types. |
+| **Single-vendor coupling.** v0.1 *ships* Claude-Code-only. | The core is already agent-agnostic: it is built around **AAP** ([PROTOCOL.md](PROTOCOL.md)) and a generic `AgentEvent`/`AgentProvider` model, with Claude Code as the reference adapter. v0.2 adds a passive OTLP listener (a second built-in provider, notify-only) proving the abstraction; v1.0 freezes `aap/1` and publishes the adapter SDK + community adapters. |
 | **Scope gravity toward an editor.** "Just let me edit the diff" is a constant pull. | The **NOTIFY + DECIDE, never CREATE** rule is a hard product boundary (§3). Read-only is the whole point: it keeps notchide small, safe, and shippable. Editing is reconsidered no earlier than v0.3 and only against a genuinely stable editor component. |
 | **Notch-only exclusion.** Many Macs (and all external displays) have no notch. | The **floating-pill fallback is first-class** (§4, §9), shipped in v0.1, not bolted on later. |
 | **Empty-demo risk.** An orchestration cockpit is unimpressive with nothing to orchestrate. | Ship with a compelling **demo GIF** and a Show HN that leads with the write action over a fullscreen app — the thing no competitor does. |

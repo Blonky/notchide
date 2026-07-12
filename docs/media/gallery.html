@@ -1,0 +1,955 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=1160">
+<title>notchide — display system</title>
+<style>
+:root{
+  --ink:#eaeaf1; --ink2:#a6a7b2; --ink3:#6f707b; --ink4:#54555f;
+  --text-primary:#ececf0; --text-secondary:#b7b8c4; --text-muted:#7f808b;
+  --hair:rgba(255,255,255,0.10); --hair2:rgba(255,255,255,0.055);
+  --ptop:#1d1f27; --code:#0d0e13;
+  --teal:#34d6ac; --amber:#f5b13a; --green:#54cf95; --red:#f2807a;
+  --add:#54cf95; --addbg:rgba(84,207,149,0.10);
+  --rem:#f2807a; --rembg:rgba(242,128,122,0.10);
+  --kw:#c9a2ff; --ty:#69d6e6; --st:#e3bd7c; --fn:#7fe0c0;
+  --primA:#37d9c1; --primB:#7b78ff;
+  --font-sans:-apple-system,"SF Pro Text",ui-sans-serif,system-ui,sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Monaco,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:#0a0a0f;}
+body{
+  font-family:var(--font-sans);color:var(--ink);
+  background:radial-gradient(120% 90% at 50% -4%, #211d3a 0%, #131019 44%, #09090e 100%);
+  background-attachment:fixed;-webkit-font-smoothing:antialiased;
+}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+
+/* ---------- gallery scaffold ---------- */
+.wrap{width:1160px;max-width:calc(100% - 40px);margin:0 auto;padding:46px 0 70px}
+.ghead{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin:2px 0 8px}
+.ghead .wm{display:flex;align-items:center;gap:10px;font-size:20px;font-weight:600;color:#f4f4f9;letter-spacing:.2px}
+.ghead .sq{width:13px;height:13px;border-radius:4px;background:linear-gradient(125deg,var(--primA),var(--primB));box-shadow:0 0 14px -2px rgba(123,120,255,.6)}
+.ghead .tag{font-size:14.5px;color:var(--ink2)}
+.ghead .sheet{margin-left:auto;font-family:var(--font-mono);font-size:11.5px;letter-spacing:.6px;color:var(--ink3);text-transform:uppercase}
+.ghead-rule{height:1px;background:linear-gradient(90deg,rgba(255,255,255,.10),rgba(255,255,255,.02) 60%,transparent);margin:20px 0 44px}
+
+.card{margin:0 0 52px}
+.clabel{display:flex;align-items:center;gap:13px;margin:0 0 17px}
+.cnum{font-family:var(--font-mono);font-size:11.5px;font-weight:600;letter-spacing:.5px;color:#0b1016;
+  background:linear-gradient(125deg,var(--primA),var(--primB));border-radius:6px;padding:3px 7px;line-height:1}
+.ctitle{font-size:15px;font-weight:600;color:#eaeaf2;letter-spacing:.1px}
+.cline{flex:1;height:1px;background:var(--hair2)}
+.caption{margin:17px 3px 0;font-size:13.5px;color:var(--ink2);line-height:1.5;max-width:860px}
+.caption b{color:#dcdde5;font-weight:600}
+
+/* ---------- desktop screen (notch scaffold) ---------- */
+.screen{position:relative;border-radius:20px;overflow:hidden;
+  background:radial-gradient(130% 92% at 50% -12%,#242043 0%,#16151f 42%,#0c0c12 100%);
+  box-shadow:0 30px 80px -34px rgba(0,0,0,0.7),0 2px 0 rgba(255,255,255,0.04) inset,0 0 0 1px rgba(255,255,255,0.05);}
+.screen.short{min-height:180px}
+.menubar{position:relative;z-index:5;height:34px;display:flex;align-items:center;justify-content:space-between;
+  padding:0 16px;font-size:13px;color:rgba(233,233,243,0.82);
+  background:linear-gradient(180deg,rgba(18,18,26,0.55),rgba(18,18,26,0.12));
+  -webkit-backdrop-filter:blur(9px);backdrop-filter:blur(9px);border-bottom:1px solid rgba(255,255,255,0.04)}
+.mb-l,.mb-r{display:flex;align-items:center;gap:17px;white-space:nowrap}
+.mb-l .brand{font-weight:500;color:#f3f3f8}
+.mb-r{gap:14px;color:rgba(233,233,243,0.72)}
+.mb-r .clock{color:#f0f0f6;font-variant-numeric:tabular-nums}
+.mi{width:15px;height:15px;opacity:.9;display:inline-block;vertical-align:-.15em}
+
+.ghost{position:absolute;z-index:1;top:64px;width:290px;opacity:.13;filter:blur(0.4px);pointer-events:none;
+  border-radius:10px;border:1px solid rgba(255,255,255,0.25);overflow:hidden}
+.ghost.l{left:36px}.ghost.r{right:40px;top:96px;width:240px}
+.ghost .bar{display:flex;align-items:center;gap:6px;padding:7px 9px;background:rgba(255,255,255,0.06)}
+.ghost .gd{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,0.5)}
+.ghost .gu{margin-left:8px;height:13px;flex:1;border-radius:7px;background:rgba(255,255,255,0.14)}
+.ghost .gb{height:118px;background:repeating-linear-gradient(180deg,rgba(255,255,255,0.05) 0 12px,transparent 12px 34px)}
+
+.notch{position:absolute;z-index:6;top:0;left:50%;transform:translateX(-50%);width:420px;height:74px;
+  filter:drop-shadow(0 6px 14px rgba(90,120,255,0.16))}
+.notch.plain{filter:drop-shadow(0 5px 12px rgba(0,0,0,0.4))}
+.nglow{position:absolute;z-index:6;top:52px;left:50%;transform:translateX(-50%);width:220px;height:22px;pointer-events:none;
+  background:radial-gradient(ellipse at center,rgba(110,150,255,0.5),rgba(120,120,255,0) 70%);filter:blur(7px);opacity:.65}
+
+/* ---------- cockpit glyphs beside the notch ---------- */
+.cockpit{position:absolute;z-index:7;top:8px;left:calc(50% + 106px);display:flex;align-items:center;gap:13px}
+.agent{display:flex;align-items:center;gap:6px}
+.sdot{width:8px;height:8px;border-radius:50%;position:relative;flex:none}
+.sdot.amber{background:var(--amber);box-shadow:0 0 8px rgba(245,177,58,0.6)}
+.sdot.teal{background:var(--teal);box-shadow:0 0 7px rgba(52,214,172,0.5);animation:breathe 2.6s ease-in-out infinite}
+.sdot.green{background:var(--green);box-shadow:0 0 7px rgba(84,207,149,0.5)}
+.sdot.red{background:var(--red);box-shadow:0 0 7px rgba(242,128,122,0.5)}
+.sdot.amber::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid var(--amber);
+  animation:pulse 1.9s ease-out infinite}
+.sdot.red::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid rgba(242,128,122,.7);
+  animation:pulse 2.4s ease-out infinite}
+@keyframes pulse{0%{transform:scale(0.7);opacity:.9}70%{transform:scale(2.1);opacity:0}100%{opacity:0}}
+@keyframes breathe{0%,100%{opacity:.5}50%{opacity:1}}
+
+/* provider micro-badge */
+.pb{display:inline-flex;align-items:center;justify-content:center;border-radius:5px;border:1px solid var(--hair);flex:none}
+.pb.sm{width:16px;height:16px}
+.pb.md{width:20px;height:20px;border-radius:6px}
+.pb.sm svg{width:10px;height:10px}
+.pb.md svg{width:13px;height:13px}
+.pb.claude{color:#e58c67;background:rgba(217,119,87,0.15);border-color:rgba(217,119,87,0.32)}
+.pb.codex{color:#2fc39c;background:rgba(16,163,127,0.15);border-color:rgba(16,163,127,0.32)}
+.pb.cursor{color:#7ea6ff;background:rgba(110,161,255,0.15);border-color:rgba(110,161,255,0.32)}
+.pb.aider{color:#c39bea;background:rgba(185,139,224,0.15);border-color:rgba(185,139,224,0.32)}
+.pb.openclaw{color:#ef85ab;background:rgba(232,111,158,0.15);border-color:rgba(232,111,158,0.34)}
+.cockpit .pb{opacity:.9}
+
+/* ---------- console panel (grows from notch) ---------- */
+.panelwrap{position:relative;z-index:4;width:min(848px,92%);margin:10px auto 30px}
+.panel{position:relative;border-radius:16px;padding:46px 22px 18px;
+  background:linear-gradient(180deg,var(--ptop) 0,var(--ptop) 42px,#191a21 130px,#141419 100%);
+  border:1px solid var(--hair2);border-top:none;
+  box-shadow:0 34px 70px -34px rgba(0,0,0,0.7),0 1px 0 rgba(255,255,255,0.04) inset}
+
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.lead{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500}
+.lead.needs{color:var(--amber)} .lead.watch{color:var(--teal)}
+.lead .li{width:15px;height:15px;display:inline-block;vertical-align:-.15em}
+.chips{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-left:auto}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#c7c8d2;
+  background:rgba(255,255,255,0.05);border:1px solid var(--hair2);border-radius:7px;padding:3px 8px;white-space:nowrap}
+.chip .ci{width:13px;height:13px;opacity:.85;display:inline-block;vertical-align:-.15em}
+.chip.mono{font-family:var(--font-mono)}
+.chip.prov{padding:2px 8px 2px 4px;gap:6px}
+
+.cmdlabel{font-size:12px;color:var(--ink3);margin:14px 0 7px}
+.cmd{position:relative;display:flex;align-items:center;gap:11px;font-family:var(--font-mono);
+  background:linear-gradient(180deg,#111218,#0d0e13);border:1px solid rgba(242,128,122,0.28);
+  border-radius:11px;padding:13px 15px 13px 16px;overflow-x:auto}
+.cmd.calm{border-color:var(--hair)}
+.cmd::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:11px 0 0 11px;
+  background:linear-gradient(180deg,#f2807a,#e05a54)}
+.cmd.calm::before{background:linear-gradient(180deg,#4a4c58,#33353f)}
+.cmd .pr{color:var(--ink4)}
+.cmd .t{font-size:16px;font-weight:500;color:#ececf2;white-space:nowrap;letter-spacing:.2px}
+.cmd .t .dg{color:#ff8a83}
+.cmd .tag{margin-left:auto;display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#f2b0ac;
+  background:rgba(242,128,122,0.12);border:1px solid rgba(242,128,122,0.3);border-radius:6px;padding:3px 8px;white-space:nowrap}
+.cmd .tag.neutral{color:#b9bac6;background:rgba(255,255,255,.05);border-color:var(--hair2)}
+.cmd .tag svg{width:13px;height:13px;display:inline-block;vertical-align:-.15em}
+
+.actions{display:flex;align-items:center;gap:9px;margin-top:13px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:500;border-radius:9px;
+  padding:9px 16px;cursor:pointer;border:1px solid transparent;line-height:1}
+.btn svg{width:16px;height:16px;display:inline-block;vertical-align:-.15em}
+.deny{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.16);color:#eef0f5}
+.approve{color:#07141b;background:linear-gradient(120deg,var(--primA),var(--primB));
+  box-shadow:0 6px 18px -6px rgba(90,130,255,0.6),0 0 0 1px rgba(255,255,255,0.14) inset}
+.remember{background:transparent;color:var(--ink2);border-color:transparent;padding:9px 10px}
+
+.redirect{display:flex;align-items:center;gap:10px;margin-top:11px;
+  background:#0d0e13;border:1px solid var(--hair);border-radius:9px;padding:9px 13px}
+.redirect .lbl{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink3);white-space:nowrap}
+.redirect .lbl svg{width:15px;height:15px;display:inline-block;vertical-align:-.15em}
+.redirect .txt{font-family:var(--font-mono);font-size:13px;color:#d5d6de}
+.caret{display:inline-block;width:1.5px;height:15px;background:#8ea2ff;vertical-align:-3px;margin-left:1px;animation:blink 1.05s steps(1) infinite}
+@keyframes blink{0%,50%{opacity:1}50.01%,100%{opacity:0}}
+.redirect .send{margin-left:auto;color:var(--ink3);width:16px;height:16px;display:flex}
+.redirect .send svg{width:16px;height:16px}
+
+.divln{height:1px;background:var(--hair2);margin:16px 0}
+.files{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.file{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:#c9cad4;
+  background:rgba(255,255,255,0.045);border:1px solid var(--hair2);border-radius:7px;padding:4px 10px;font-family:var(--font-mono)}
+.file.active{border-color:rgba(123,120,255,0.4);background:rgba(123,120,255,0.10);color:#e7e7ef}
+.file svg{width:14px;height:14px;opacity:.8;color:var(--ink2);display:inline-block;vertical-align:-.15em}
+.file .pl{color:var(--add)} .file .mn{color:var(--rem)}
+.sech{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink3);margin:0 0 9px}
+.sech svg{width:14px;height:14px;display:inline-block;vertical-align:-.15em}
+
+.diff{background:var(--code);border:1px solid var(--hair2);border-radius:11px;overflow-x:auto;padding:8px 0}
+.diff .hunk{font-family:var(--font-mono);font-size:12px;color:#6fd0c2;padding:2px 14px 6px;white-space:nowrap;opacity:.85}
+.drow{display:flex;align-items:stretch;font-family:var(--font-mono);font-size:12.5px;line-height:20px;white-space:pre;min-width:max-content}
+.ln{flex:0 0 34px;text-align:right;padding-right:8px;color:var(--ink4);user-select:none}
+.sg{flex:0 0 16px;text-align:center;color:var(--ink4);user-select:none}
+.cc{padding-right:18px;color:#cbccd6}
+.add{background:var(--addbg)} .add .sg{color:var(--add)}
+.rem{background:var(--rembg)} .rem .sg{color:var(--rem)}
+.cc .k{color:var(--kw)} .cc .t{color:var(--ty)} .cc .s{color:var(--st)} .cc .f{color:var(--fn)}
+
+.term{font-family:var(--font-mono);font-size:12.5px;line-height:21px;background:rgba(0,0,0,0.22);
+  border:1px solid var(--hair2);border-radius:11px;padding:11px 14px}
+.term .l{white-space:pre;color:var(--ink3)}
+.term .pr{color:#5fd6b8} .term .ok{color:var(--add)} .term .er{color:var(--rem)} .term .dim{color:var(--ink4)}
+
+.foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px}
+.jump{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink2);
+  background:rgba(255,255,255,0.045);border:1px solid var(--hair2);border-radius:8px;padding:7px 12px;cursor:pointer}
+.jump svg{width:15px;height:15px;display:inline-block;vertical-align:-.15em}
+.reason{display:inline-flex;align-items:center;gap:6px;margin-left:auto;font-size:11px;color:var(--ink4)}
+.reason svg{width:13px;height:13px;display:inline-block;vertical-align:-.15em}
+.reason b{font-weight:500;color:var(--ink3)}
+
+/* observe-only capability banner */
+.capbanner{display:flex;align-items:center;gap:12px;margin-top:13px;padding:12px 14px;border-radius:11px;
+  background:rgba(255,255,255,0.03);border:1px solid var(--hair2)}
+.capbanner .bi{width:17px;height:17px;color:var(--teal);flex:none;display:inline-block}
+.capbanner .txt{font-size:12.5px;color:var(--ink2);line-height:1.45}
+.capbanner .txt b{color:#d9dae2;font-weight:600}
+.capbanner .rt{margin-left:auto;display:flex;align-items:center;gap:9px;flex:none}
+
+/* capability pill */
+.cbadge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;letter-spacing:.5px;
+  text-transform:uppercase;border-radius:7px;padding:5px 9px;white-space:nowrap}
+.cbadge svg{width:13px;height:13px;display:inline-block;vertical-align:-.1em}
+.cbadge.observe{color:#8fdcc9;background:rgba(52,214,172,0.10);border:1px solid rgba(52,214,172,0.28)}
+.cbadge.gate{color:#b7b3ff;background:rgba(123,120,255,0.12);border:1px solid rgba(123,120,255,0.30)}
+.cbadge.actuate{color:#f0d59a;background:rgba(245,177,58,0.10);border:1px solid rgba(245,177,58,0.26)}
+
+/* ---------- session stack rows ---------- */
+.sesslist{display:flex;flex-direction:column}
+.srow{display:flex;align-items:center;gap:13px;padding:13px 6px;border-bottom:1px solid var(--hair2)}
+.srow:last-child{border-bottom:none}
+.srow .gl{display:flex;align-items:center;justify-content:center;width:14px;flex:none}
+.srow .meta,.subrow .meta{display:flex;flex-direction:column;gap:3px;min-width:0}
+.srow .m1,.subrow .m1{display:flex;align-items:center;gap:8px;font-size:13px;color:#e4e5ec;font-weight:500}
+.srow .m1 .br,.subrow .m1 .br{font-family:var(--font-mono);font-size:11.5px;font-weight:400;color:var(--ink3);
+  background:rgba(255,255,255,.045);border:1px solid var(--hair2);border-radius:6px;padding:1px 7px}
+.srow .m2,.subrow .m2{font-size:12px;color:var(--ink2);display:flex;align-items:center;gap:7px}
+.srow .m2 .mono,.subrow .m2 .mono{font-family:var(--font-mono);color:#c4c5cf}
+.srow .rgt{margin-left:auto;display:flex;align-items:center;gap:10px;flex:none}
+.statuschip{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:500;border-radius:7px;padding:4px 9px;white-space:nowrap}
+.statuschip.amber{color:#f4c980;background:rgba(245,177,58,0.10);border:1px solid rgba(245,177,58,0.28)}
+.statuschip.teal{color:#7fe3cb;background:rgba(52,214,172,0.09);border:1px solid rgba(52,214,172,0.24)}
+.statuschip.green{color:#94ddba;background:rgba(84,207,149,0.09);border:1px solid rgba(84,207,149,0.24)}
+.statuschip.red{color:#f4a7a2;background:rgba(242,128,122,0.10);border:1px solid rgba(242,128,122,0.28)}
+.chev{width:16px;height:16px;color:var(--ink3);display:inline-block}
+.subwrap{position:relative;margin:0 0 0 40px;padding-left:20px}
+.subwrap::before{content:"";position:absolute;left:0;top:-6px;bottom:18px;width:1px;background:var(--hair2)}
+.subrow{display:flex;align-items:center;gap:11px;padding:11px 6px;position:relative}
+.subrow::before{content:"";position:absolute;left:-20px;top:50%;width:16px;height:1px;background:var(--hair2)}
+.subrow .m1{font-size:12.5px}
+
+/* ---------- unfurl strip ---------- */
+.strip{display:flex;align-items:stretch;gap:0}
+.frame{flex:1;display:flex;flex-direction:column}
+.frame .mini{position:relative;border-radius:15px;overflow:hidden;flex:1;min-height:216px;
+  background:radial-gradient(130% 100% at 50% -14%,#242043 0%,#16151f 46%,#0c0c12 100%);
+  border:1px solid rgba(255,255,255,0.05);box-shadow:0 16px 40px -22px rgba(0,0,0,0.7)}
+.frame .mbar{height:24px;background:linear-gradient(180deg,rgba(18,18,26,0.5),rgba(18,18,26,0.1));
+  border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:center;padding:0 10px;gap:6px}
+.frame .mbar .d{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.18)}
+.mininotch{position:absolute;z-index:3;top:0;left:50%;transform:translateX(-50%);width:250px;height:44px}
+.morph{position:absolute;z-index:2;top:26px;left:50%;transform:translateX(-50%);width:186px;height:120px;
+  border-radius:0 0 18px 18px;background:linear-gradient(180deg,#050608,#0c0d13 70%,#111219);
+  border:1px solid rgba(255,255,255,0.06);border-top:none;
+  box-shadow:0 22px 40px -20px rgba(0,0,0,.75);overflow:hidden;animation:grow 3.4s ease-in-out infinite}
+@keyframes grow{0%,100%{height:104px}50%{height:128px}}
+.morph .skel{position:absolute;left:16px;right:16px;height:8px;border-radius:5px;
+  background:linear-gradient(90deg,rgba(255,255,255,.04),rgba(255,255,255,.09),rgba(255,255,255,.04));
+  background-size:300px 100%;animation:shimmer 1.9s linear infinite}
+.morph .s1{top:34px;width:auto}.morph .s2{top:52px;right:60px}.morph .s3{top:70px;right:38px}
+@keyframes shimmer{0%{background-position:-160px 0}100%{background-position:160px 0}}
+.miniconsole{position:absolute;z-index:2;top:26px;left:50%;transform:translateX(-50%);width:216px;
+  border-radius:0 0 16px 16px;background:linear-gradient(180deg,#1d1f27 0,#191a21 40px,#141419 100%);
+  border:1px solid var(--hair2);border-top:none;padding:14px 13px 13px;
+  box-shadow:0 24px 44px -22px rgba(0,0,0,.78)}
+.miniconsole .mc-h{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--amber);font-weight:500;margin-bottom:9px}
+.miniconsole .mc-cmd{display:flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;color:#e7e7ee;
+  background:#0d0e13;border:1px solid rgba(242,128,122,.28);border-left:2px solid #e05a54;border-radius:7px;padding:7px 9px;margin-bottom:9px}
+.miniconsole .mc-cmd .dg{color:#ff8a83}
+.miniconsole .mc-diff{font-family:var(--font-mono);font-size:10.5px;line-height:16px;background:var(--code);
+  border:1px solid var(--hair2);border-radius:7px;padding:5px 8px;overflow:hidden}
+.miniconsole .mc-diff .a{color:#8fe0b6;background:var(--addbg)}
+.miniconsole .mc-diff .r{color:#f2a19c;background:var(--rembg)}
+.miniconsole .mc-diff .g{color:var(--ink4)}
+.fcap{display:flex;align-items:center;gap:7px;justify-content:center;margin-top:11px;font-size:11.5px;color:var(--ink3)}
+.fcap .n{font-family:var(--font-mono);color:#8ea2ff}
+.arrow{flex:0 0 46px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--ink4)}
+.arrow svg{width:22px;height:22px}
+.arrow .sp{font-size:9px;letter-spacing:.5px;color:var(--ink4);writing-mode:vertical-rl;transform:rotate(180deg);opacity:.7}
+
+/* ---------- floating island (external display) ---------- */
+.extscreen{position:relative;border-radius:20px;overflow:hidden;aspect-ratio:16/9.6;
+  background:radial-gradient(120% 100% at 26% -6%, #17303a 0%, #121820 46%, #0a0d12 100%);
+  box-shadow:0 30px 80px -34px rgba(0,0,0,0.72),0 0 0 1px rgba(255,255,255,0.05);}
+.extscreen .menubar{background:linear-gradient(180deg,rgba(14,20,26,0.55),rgba(14,20,26,0.10))}
+.extbadge{position:absolute;z-index:5;right:16px;bottom:14px;display:inline-flex;align-items:center;gap:6px;
+  font-size:11px;color:var(--ink3);background:rgba(0,0,0,0.28);border:1px solid var(--hair2);border-radius:8px;padding:5px 9px}
+.extbadge svg{width:13px;height:13px;display:inline-block;vertical-align:-.1em}
+.island{position:absolute;z-index:7;top:30px;left:50%;transform:translateX(-50%);width:600px;max-width:88%;
+  border-radius:20px;overflow:hidden;
+  background:linear-gradient(180deg,#20222b 0,#1a1b23 90px,#151519 100%);
+  border:1px solid rgba(255,255,255,0.08);
+  box-shadow:0 40px 90px -30px rgba(0,0,0,0.8),0 1px 0 rgba(255,255,255,0.06) inset}
+.island .ihead{display:flex;align-items:center;gap:12px;padding:12px 16px 12px;border-bottom:1px solid var(--hair2);
+  background:linear-gradient(180deg,rgba(255,255,255,0.03),transparent)}
+.island .grab{width:34px;height:4px;border-radius:3px;background:rgba(255,255,255,0.16);position:absolute;left:50%;top:7px;transform:translateX(-50%)}
+.island .icock{display:flex;align-items:center;gap:13px;margin-left:2px}
+.island .ihl{margin-left:auto;font-size:11px;color:var(--ink3);display:inline-flex;align-items:center;gap:6px}
+.island .ihl svg{width:13px;height:13px;display:inline-block;vertical-align:-.1em}
+.island .ibody{padding:15px 16px 16px}
+
+/* ---------- connections modal ---------- */
+.moscene{position:relative;border-radius:20px;overflow:hidden;min-height:512px;
+  background:radial-gradient(130% 92% at 50% -12%,#242043 0%,#15141d 44%,#0b0b10 100%);
+  box-shadow:0 30px 80px -34px rgba(0,0,0,0.7),0 0 0 1px rgba(255,255,255,0.05)}
+.moscene .scrim{position:absolute;inset:0;background:rgba(6,6,10,0.55);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+.modal{position:relative;z-index:3;width:760px;max-width:90%;margin:56px auto;border-radius:18px;overflow:hidden;
+  background:linear-gradient(180deg,#1b1c24,#151519);border:1px solid rgba(255,255,255,0.09);
+  box-shadow:0 50px 110px -34px rgba(0,0,0,0.85),0 1px 0 rgba(255,255,255,0.06) inset}
+.msearch{display:flex;align-items:center;gap:11px;padding:16px 18px;border-bottom:1px solid var(--hair2)}
+.msearch .si{width:18px;height:18px;color:var(--ink3);flex:none}
+.msearch .sq{flex:1;font-size:15px;color:var(--ink3);font-family:var(--font-sans)}
+.msearch .sq .cw{color:#e7e7ee}
+.msearch .count{font-size:12px;color:var(--ink2);background:rgba(255,255,255,0.05);border:1px solid var(--hair2);
+  border-radius:20px;padding:5px 11px;white-space:nowrap}
+.msearch .count b{color:var(--teal);font-weight:600}
+.mgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:18px}
+.tile{position:relative;border-radius:14px;padding:16px;border:1px solid var(--hair2);
+  background:rgba(255,255,255,0.02);min-height:126px;display:flex;flex-direction:column;gap:11px}
+.tile .tico{width:42px;height:42px;border-radius:11px;display:flex;align-items:center;justify-content:center}
+.tile .tico svg{width:24px;height:24px}
+.tile .tn{font-size:13.5px;font-weight:600;color:#e9e9f1}
+.tile .ts{font-size:11.5px;color:var(--ink3);display:flex;align-items:center;gap:6px;margin-top:auto}
+.tile .ts .dot{width:6px;height:6px;border-radius:50%}
+.t-claude .tico{background:rgba(217,119,87,0.18);color:#e58c67}
+.t-codex .tico{background:rgba(16,163,127,0.18);color:#2fc39c}
+.t-cursor .tico{background:rgba(110,161,255,0.28);color:#8fb2ff}
+.t-aider .tico{background:rgba(185,139,224,0.18);color:#c39bea}
+.t-openclaw .tico{background:rgba(232,111,158,0.18);color:#ef85ab}
+.tile.connected{border-color:rgba(52,214,172,0.5);animation:halo 3s ease-in-out infinite}
+@keyframes halo{0%,100%{box-shadow:0 0 0 1px rgba(52,214,172,.4),0 0 0 0 rgba(123,120,255,0)}
+  50%{box-shadow:0 0 0 1px rgba(52,214,172,.65),0 0 26px 2px rgba(123,120,255,.26)}}
+.tile.connected .ts{color:var(--teal)} .tile.connected .ts .dot{background:var(--teal)}
+.tile.hovered{background:rgba(110,161,255,0.05);border-color:rgba(110,161,255,0.28);transform:translateY(-2px);
+  box-shadow:0 16px 30px -18px rgba(0,0,0,.7)}
+.tile.connecting .ts{color:#c39bea}
+.spinner{width:14px;height:14px;border-radius:50%;border:2px solid rgba(195,155,234,0.25);border-top-color:#c39bea;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.tile.add{border-style:dashed;border-color:rgba(255,255,255,0.16);background:transparent;align-items:center;justify-content:center;color:var(--ink3)}
+.tile.add .plus{width:40px;height:40px;border-radius:11px;border:1px dashed rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center}
+.tile.add .plus svg{width:20px;height:20px}
+.tile.add .tn{color:var(--ink2);font-weight:500;font-size:12.5px;text-align:center}
+
+/* ---------- capability legend ---------- */
+.legend{display:flex;align-items:stretch;gap:22px;flex-wrap:wrap;padding:22px 24px;border-radius:16px;
+  background:linear-gradient(180deg,#191a21,#141419);border:1px solid var(--hair2);
+  box-shadow:0 20px 50px -30px rgba(0,0,0,.6)}
+.leg-group{display:flex;flex-direction:column;gap:12px}
+.leg-group.grow{flex:1;min-width:280px}
+.leg-title{font-size:10.5px;letter-spacing:.7px;text-transform:uppercase;color:var(--ink3);font-weight:600}
+.leg-items{display:flex;gap:22px;flex-wrap:wrap}
+.leg-item{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--ink2)}
+.leg-item .lbl b{color:#e2e3ea;font-weight:600}
+.leg-item .lbl span{color:var(--ink3);font-size:11px;display:block;margin-top:1px}
+.leg-sep{width:1px;background:var(--hair2);align-self:stretch}
+.leg-caps{display:flex;flex-direction:column;gap:10px}
+.leg-cap{display:flex;align-items:center;gap:10px}
+.leg-cap .meaning{font-size:11.5px;color:var(--ink2)}
+.leg-cap .meaning b{color:#dcdde5;font-weight:600;display:block;font-size:12px}
+
+/* ---------- page footer ---------- */
+.gfoot{display:flex;align-items:center;gap:9px;margin-top:38px;padding-top:22px;
+  border-top:1px solid var(--hair2);font-size:12.5px;color:var(--ink3)}
+.gfoot .sq{width:8px;height:8px;border-radius:2px;background:linear-gradient(125deg,var(--primA),var(--primB))}
+.gfoot .wm{font-weight:600;color:#dbdbe4;letter-spacing:.2px}
+.gfoot .dv{opacity:.5}
+</style>
+</head>
+<body>
+
+<!-- inline icon sprite (no external refs) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="ic-claude" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 2.6v5M12 16.4v5M2.6 12h5M16.4 12h5M5.4 5.4l3 3M15.6 15.6l3 3M18.6 5.4l-3 3M8.4 15.6l-3 3"/></g></symbol>
+  <symbol id="ic-codex" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="12" cy="12" rx="3.6" ry="8.4"/><ellipse cx="12" cy="12" rx="3.6" ry="8.4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="3.6" ry="8.4" transform="rotate(120 12 12)"/></g></symbol>
+  <symbol id="ic-cursor" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></g></symbol>
+  <symbol id="ic-aider" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 10l3 2-3 2M13 14h4"/></g></symbol>
+  <symbol id="ic-openclaw" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21v-8"/><path d="M12 13C12 8 9 4.4 5.4 4 5 7.6 6.6 10.6 9.6 12.2"/><path d="M12 13c0-5 3-8.6 6.6-9 .4 3.6-1.2 6.6-4.2 8.2"/></g></symbol>
+  <symbol id="ic-plus" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></g></symbol>
+  <symbol id="ic-eye" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.6"/></g></symbol>
+  <symbol id="ic-shield" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 2.5v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9v-5z"/><path d="M9 12l2 2 4-4"/></g></symbol>
+  <symbol id="ic-bolt" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></g></symbol>
+</svg>
+
+<div class="wrap">
+
+  <header class="ghead">
+    <div class="wm"><span class="sq"></span>notchide</div>
+    <div class="tag">the open notch platform for coding agents</div>
+    <div class="sheet">Display System · states 01–10</div>
+  </header>
+  <div class="ghead-rule"></div>
+
+  <!-- ============ 01 IDLE ============ -->
+  <section class="card">
+    <div class="clabel"><span class="cnum">01</span><span class="ctitle">Idle pill</span><span class="cline"></span></div>
+    <div class="stage">
+      <div class="screen">
+        <div class="ghost l" aria-hidden="true"><div class="bar"><span class="gd"></span><span class="gd"></span><span class="gd"></span><span class="gu"></span></div><div class="gb"></div></div>
+        <div class="ghost r" aria-hidden="true"><div class="bar"><span class="gd"></span><span class="gd"></span><span class="gd"></span><span class="gu"></span></div><div class="gb"></div></div>
+        <div class="menubar">
+          <div class="mb-l">
+            <svg class="mi" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 13.5c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.15-2.8.85-3.5.85-.7 0-1.85-.83-3-.8-1.55.02-2.98.9-3.77 2.29-1.6 2.79-.41 6.92 1.15 9.19.76 1.11 1.67 2.35 2.86 2.31 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.13 2.76-2.24.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.42-3.65z"/><path d="M14.9 6.5c.64-.78 1.07-1.86.95-2.94-.92.04-2.03.61-2.69 1.39-.59.69-1.11 1.79-.97 2.85 1.02.08 2.07-.52 2.71-1.3z"/></svg>
+            <span class="brand">notchide</span><span>File</span><span>Edit</span><span>View</span>
+          </div>
+          <div class="mb-r">
+            <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="15" height="8" rx="2"/><path d="M19 10.5v3"/><rect x="4.3" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="7.6" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="10.9" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/></svg>
+            <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 18h.01"/><path d="M9.17 15.17a4 4 0 0 1 5.66 0"/><path d="M6.34 12.34a8 8 0 0 1 11.32 0"/><path d="M3.51 9.51c4.69-4.68 12.29-4.68 17 0"/></svg>
+            <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="6.5"/><path d="M20 20l-4.5-4.5"/></svg>
+            <span class="clock">9:41</span>
+          </div>
+        </div>
+        <svg class="notch plain" viewBox="0 0 420 74" aria-hidden="true">
+          <path d="M0,74 L0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44 L420,74 Z" fill="#1d1f27"/>
+          <path d="M0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44" fill="none" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+          <path d="M115,0 L305,0 L305,48 Q305,64 289,64 L131,64 Q115,64 115,48 Z" fill="#050608" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+        </svg>
+        <div style="height:150px"></div>
+      </div>
+    </div>
+    <p class="caption"><b>Idle</b> — calm by default. Nothing competes with your work.</p>
+  </section>
+
+  <!-- ============ 02 SINGLE-AGENT COCKPIT ============ -->
+  <section class="card">
+    <div class="clabel"><span class="cnum">02</span><span class="ctitle">Single-agent cockpit</span><span class="cline"></span></div>
+    <div class="stage">
+      <div class="screen">
+        <div class="ghost l" aria-hidden="true"><div class="bar"><span class="gd"></span><span class="gd"></span><span class="gd"></span><span class="gu"></span></div><div class="gb"></div></div>
+        <div class="menubar">
+          <div class="mb-l">
+            <svg class="mi" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 13.5c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.15-2.8.85-3.5.85-.7 0-1.85-.83-3-.8-1.55.02-2.98.9-3.77 2.29-1.6 2.79-.41 6.92 1.15 9.19.76 1.11 1.67 2.35 2.86 2.31 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.13 2.76-2.24.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.42-3.65z"/><path d="M14.9 6.5c.64-.78 1.07-1.86.95-2.94-.92.04-2.03.61-2.69 1.39-.59.69-1.11 1.79-.97 2.85 1.02.08 2.07-.52 2.71-1.3z"/></svg>
+            <span class="brand">notchide</span><span>File</span><span>Edit</span><span>View</span>
+          </div>
+          <div class="mb-r">
+            <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="15" height="8" rx="2"/><path d="M19 10.5v3"/><rect x="4.3" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="7.6" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="10.9" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/></svg>
+            <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 18h.01"/><path d="M9.17 15.17a4 4 0 0 1 5.66 0"/><path d="M6.34 12.34a8 8 0 0 1 11.32 0"/><path d="M3.51 9.51c4.69-4.68 12.29-4.68 17 0"/></svg>
+            <span class="clock">9:41</span>
+          </div>
+        </div>
+        <svg class="notch" viewBox="0 0 420 74" aria-hidden="true">
+          <path d="M0,74 L0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44 L420,74 Z" fill="#1d1f27"/>
+          <path d="M0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44" fill="none" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+          <path d="M115,0 L305,0 L305,48 Q305,64 289,64 L131,64 Q115,64 115,48 Z" fill="#050608" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+        </svg>
+        <div class="nglow" aria-hidden="true"></div>
+        <div class="cockpit" aria-hidden="true">
+          <div class="agent"><span class="pb sm claude"><svg><use href="#ic-claude"/></svg></span><span class="sdot amber"></span></div>
+        </div>
+        <div style="height:150px"></div>
+      </div>
+    </div>
+    <p class="caption"><b>One agent needs you</b> — color+motion, no text.</p>
+  </section>
+
+  <!-- ============ 03 MULTI-AGENT COCKPIT ============ -->
+  <section class="card">
+    <div class="clabel"><span class="cnum">03</span><span class="ctitle">Multi-agent cockpit · collapsed</span><span class="cline"></span></div>
+    <div class="stage">
+      <div class="screen">
+        <div class="ghost l" aria-hidden="true"><div class="bar"><span class="gd"></span><span class="gd"></span><span class="gd"></span><span class="gu"></span></div><div class="gb"></div></div>
+        <div class="menubar">
+          <div class="mb-l">
+            <svg class="mi" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 13.5c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.15-2.8.85-3.5.85-.7 0-1.85-.83-3-.8-1.55.02-2.98.9-3.77 2.29-1.6 2.79-.41 6.92 1.15 9.19.76 1.11 1.67 2.35 2.86 2.31 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.13 2.76-2.24.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.42-3.65z"/><path d="M14.9 6.5c.64-.78 1.07-1.86.95-2.94-.92.04-2.03.61-2.69 1.39-.59.69-1.11 1.79-.97 2.85 1.02.08 2.07-.52 2.71-1.3z"/></svg>
+            <span class="brand">notchide</span><span>File</span><span>Edit</span><span>View</span>
+          </div>
+          <div class="mb-r">
+            <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="15" height="8" rx="2"/><path d="M19 10.5v3"/><rect x="4.3" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="7.6" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="10.9" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/></svg>
+            <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 18h.01"/><path d="M9.17 15.17a4 4 0 0 1 5.66 0"/><path d="M6.34 12.34a8 8 0 0 1 11.32 0"/><path d="M3.51 9.51c4.69-4.68 12.29-4.68 17 0"/></svg>
+            <span class="clock">9:41</span>
+          </div>
+        </div>
+        <svg class="notch" viewBox="0 0 420 74" aria-hidden="true">
+          <path d="M0,74 L0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44 L420,74 Z" fill="#1d1f27"/>
+          <path d="M0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44" fill="none" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+          <path d="M115,0 L305,0 L305,48 Q305,64 289,64 L131,64 Q115,64 115,48 Z" fill="#050608" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+        </svg>
+        <div class="nglow" aria-hidden="true"></div>
+        <div class="cockpit" aria-hidden="true">
+          <div class="agent"><span class="pb sm claude"><svg><use href="#ic-claude"/></svg></span><span class="sdot amber"></span></div>
+          <div class="agent"><span class="pb sm codex"><svg><use href="#ic-codex"/></svg></span><span class="sdot teal"></span></div>
+          <div class="agent"><span class="pb sm aider"><svg><use href="#ic-aider"/></svg></span><span class="sdot green"></span></div>
+        </div>
+        <div style="height:150px"></div>
+      </div>
+    </div>
+    <p class="caption"><b>Three agents, one glance</b> — needs-you first.</p>
+  </section>
+
+  <!-- ============ 04 THE UNFURL ============ -->
+  <section class="card">
+    <div class="clabel"><span class="cnum">04</span><span class="ctitle">The unfurl</span><span class="cline"></span></div>
+    <div class="stage">
+      <div class="strip">
+        <!-- (a) pill -->
+        <div class="frame">
+          <div class="mini">
+            <div class="mbar"><span class="d"></span><span class="d"></span><span class="d"></span></div>
+            <svg class="mininotch" viewBox="0 0 420 74" aria-hidden="true">
+              <path d="M0,74 L0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44 L420,74 Z" fill="#1d1f27"/>
+              <path d="M115,0 L305,0 L305,48 Q305,64 289,64 L131,64 Q115,64 115,48 Z" fill="#050608" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+            </svg>
+          </div>
+          <div class="fcap"><span class="n">a</span> resting pill</div>
+        </div>
+        <div class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg><span class="sp">spring</span></div>
+        <!-- (b) mid-morph -->
+        <div class="frame">
+          <div class="mini">
+            <div class="mbar"><span class="d"></span><span class="d"></span><span class="d"></span></div>
+            <svg class="mininotch" viewBox="0 0 420 74" aria-hidden="true">
+              <path d="M0,74 L0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44 L420,74 Z" fill="#1d1f27"/>
+            </svg>
+            <div class="morph" aria-hidden="true">
+              <span class="skel s1"></span><span class="skel s2"></span><span class="skel s3"></span>
+            </div>
+          </div>
+          <div class="fcap"><span class="n">b</span> geometry first</div>
+        </div>
+        <div class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg><span class="sp">settle</span></div>
+        <!-- (c) settled console -->
+        <div class="frame">
+          <div class="mini">
+            <div class="mbar"><span class="d"></span><span class="d"></span><span class="d"></span></div>
+            <svg class="mininotch" viewBox="0 0 420 74" aria-hidden="true">
+              <path d="M0,74 L0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44 L420,74 Z" fill="#1d1f27"/>
+            </svg>
+            <div class="miniconsole" aria-hidden="true">
+              <div class="mc-h"><span class="pb sm claude" style="width:14px;height:14px"><svg><use href="#ic-claude"/></svg></span>permission requested</div>
+              <div class="mc-cmd"><span style="color:#54555f">$</span> <span class="dg">rm&nbsp;-rf</span>&nbsp;build/</div>
+              <div class="mc-diff"><div class="r">−  let cents = Int(amt)</div><div class="a">+  let cents = decimal(amt)</div><div class="g">   return confirm(intent)</div></div>
+            </div>
+          </div>
+          <div class="fcap"><span class="n">c</span> content second</div>
+        </div>
+      </div>
+    </div>
+    <p class="caption"><b>It grows out of the notch</b> — geometry first, content second. One continuous spring, never a window that pops in.</p>
+  </section>
+
+  <!-- ============ 05 REVIEW CONSOLE · GATE ============ -->
+  <section class="card">
+    <div class="clabel"><span class="cnum">05</span><span class="ctitle">Review console · GATE lane</span><span class="cline"></span></div>
+    <div class="stage">
+      <div class="screen">
+        <div class="menubar">
+          <div class="mb-l">
+            <svg class="mi" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 13.5c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.15-2.8.85-3.5.85-.7 0-1.85-.83-3-.8-1.55.02-2.98.9-3.77 2.29-1.6 2.79-.41 6.92 1.15 9.19.76 1.11 1.67 2.35 2.86 2.31 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.13 2.76-2.24.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.42-3.65z"/><path d="M14.9 6.5c.64-.78 1.07-1.86.95-2.94-.92.04-2.03.61-2.69 1.39-.59.69-1.11 1.79-.97 2.85 1.02.08 2.07-.52 2.71-1.3z"/></svg>
+            <span class="brand">notchide</span><span>File</span><span>Edit</span><span>View</span>
+          </div>
+          <div class="mb-r">
+            <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="15" height="8" rx="2"/><path d="M19 10.5v3"/><rect x="4.3" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="7.6" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="10.9" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/></svg>
+            <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 18h.01"/><path d="M9.17 15.17a4 4 0 0 1 5.66 0"/><path d="M6.34 12.34a8 8 0 0 1 11.32 0"/><path d="M3.51 9.51c4.69-4.68 12.29-4.68 17 0"/></svg>
+            <span class="clock">9:41</span>
+          </div>
+        </div>
+        <svg class="notch" viewBox="0 0 420 74" aria-hidden="true">
+          <path d="M0,74 L0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44 L420,74 Z" fill="#1d1f27"/>
+          <path d="M0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44" fill="none" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+          <path d="M115,0 L305,0 L305,48 Q305,64 289,64 L131,64 Q115,64 115,48 Z" fill="#050608" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+        </svg>
+        <div class="nglow" aria-hidden="true"></div>
+        <div class="cockpit" aria-hidden="true">
+          <div class="agent"><span class="pb sm claude"><svg><use href="#ic-claude"/></svg></span><span class="sdot amber"></span></div>
+          <div class="agent"><span class="pb sm codex"><svg><use href="#ic-codex"/></svg></span><span class="sdot teal"></span></div>
+          <div class="agent"><span class="pb sm aider"><svg><use href="#ic-aider"/></svg></span><span class="sdot green"></span></div>
+        </div>
+
+        <div class="panelwrap"><div class="panel">
+          <div class="row">
+            <span class="lead needs"><svg class="li" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 2.5v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9v-5z"/><circle cx="12" cy="11" r="1.4"/><path d="M12 12.4v2.2"/></svg>permission requested</span>
+            <span class="chips">
+              <span class="chip prov"><span class="pb sm claude"><svg><use href="#ic-claude"/></svg></span>Claude Code</span>
+              <span class="chip mono"><svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l2-2h4l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></svg>~/work/payments-api</span>
+              <span class="chip"><svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="18" r="2"/><circle cx="7" cy="6" r="2"/><circle cx="17" cy="6" r="2"/><path d="M7 8v8"/><path d="M9 18h6a2 2 0 0 0 2-2V8"/></svg>feat/payments</span>
+              <span class="chip mono"><svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9l3 3l-3 3"/><path d="M13 15h4"/></svg>Bash</span>
+            </span>
+          </div>
+
+          <div class="cmdlabel">wants to run</div>
+          <div class="cmd">
+            <span class="pr">$</span>
+            <span class="t"><span class="dg">rm -rf</span> build/</span>
+            <span class="tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5L21 19.5H3z"/><path d="M12 10v4"/><path d="M12 17h.01"/></svg>destructive · 128 files</span>
+          </div>
+
+          <div class="actions">
+            <button class="btn deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>Deny</button>
+            <button class="btn approve"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>Approve</button>
+            <button class="btn remember"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9.83 9.17a4 4 0 1 0 0 5.66a10 10 0 0 0 2.17-2.83a10 10 0 0 1 2.17-2.83a4 4 0 1 1 0 5.66a10 10 0 0 1-2.17-2.83a10 10 0 0 0-2.17-2.83"/></svg>Approve &amp; remember</button>
+          </div>
+
+          <div class="redirect">
+            <span class="lbl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 13l-4-4 4-4"/><path d="M5 9h10a4 4 0 0 1 0 8h-1"/></svg>redirect</span>
+            <span class="txt">actually target dist/ instead<span class="caret"></span></span>
+            <span class="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6"/><path d="M6 12l6-6 6 6"/></svg></span>
+          </div>
+
+          <div class="divln"></div>
+
+          <div class="sech"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M3 12h5.8"/><path d="M15.2 12H21"/></svg>just edited</div>
+          <div class="files">
+            <span class="file active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M10 13l-2 2 2 2"/><path d="M14 13l2 2-2 2"/></svg>PaymentService.swift · <span class="pl">+18</span> <span class="mn">−4</span></span>
+            <span class="file"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M10 13l-2 2 2 2"/><path d="M14 13l2 2-2 2"/></svg>Config.swift · <span class="pl">+2</span> <span class="mn">−0</span></span>
+          </div>
+
+          <div class="diff">
+            <div class="hunk">@@ -12,7 +12,9 @@ PaymentService · charge(_:to:)</div>
+            <div class="drow"><span class="ln">12</span><span class="sg"> </span><code class="cc"><span class="k">func</span> <span class="f">charge</span>(_ amount: <span class="t">Decimal</span>, to card: <span class="t">Card</span>) <span class="k">async</span> <span class="k">throws</span> -&gt; <span class="t">Receipt</span> {</code></div>
+            <div class="drow"><span class="ln">13</span><span class="sg"> </span><code class="cc">    <span class="k">guard</span> amount &gt; 0 <span class="k">else</span> { <span class="k">throw</span> <span class="t">PaymentError</span>.invalidAmount }</code></div>
+            <div class="drow rem"><span class="ln">14</span><span class="sg">−</span><code class="cc">    <span class="k">let</span> cents = <span class="t">Int</span>(amount * 100)</code></div>
+            <div class="drow add"><span class="ln">14</span><span class="sg">+</span><code class="cc">    <span class="k">let</span> cents = <span class="t">NSDecimalNumber</span>(decimal: amount * 100).<span class="f">intValue</span></code></div>
+            <div class="drow"><span class="ln">15</span><span class="sg"> </span><code class="cc">    <span class="k">let</span> key = card.customerID + <span class="s">"-"</span> + reference</code></div>
+            <div class="drow add"><span class="ln">16</span><span class="sg">+</span><code class="cc">    <span class="k">try</span> <span class="k">await</span> rateLimiter.<span class="f">acquire</span>(for: card.customerID)</code></div>
+            <div class="drow"><span class="ln">17</span><span class="sg"> </span><code class="cc">    <span class="k">let</span> intent = <span class="k">try</span> <span class="k">await</span> gateway.<span class="f">createIntent</span>(cents, key: key)</code></div>
+            <div class="drow rem"><span class="ln">18</span><span class="sg">−</span><code class="cc">    <span class="k">return</span> intent</code></div>
+            <div class="drow add"><span class="ln">18</span><span class="sg">+</span><code class="cc">    <span class="k">return</span> <span class="k">try</span> <span class="k">await</span> gateway.<span class="f">confirm</span>(intent)</code></div>
+            <div class="drow"><span class="ln">19</span><span class="sg"> </span><code class="cc">}</code></div>
+          </div>
+
+          <div class="divln"></div>
+
+          <div class="sech"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9l3 3l-3 3"/><path d="M13 15h4"/></svg>output</div>
+          <div class="term">
+            <div class="l"><span class="pr">›</span> swift build   <span class="dim">— compiling PaymentService.swift (2 of 7)</span></div>
+            <div class="l"><span class="pr">›</span> swift test --filter PaymentTests</div>
+            <div class="l"><span class="ok">✓</span> 42 passed · 0 failed   <span class="dim">1.8s</span></div>
+            <div class="l"><span class="dim">building release…</span></div>
+          </div>
+
+          <div class="foot">
+            <button class="jump"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h4v4"/><path d="M20 4l-6 6"/><path d="M8 20H4v-4"/><path d="M4 20l6-6"/></svg>Jump to terminal</button>
+            <span class="reason"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"/><path d="M16.7 16.7A9.8 9.8 0 0 1 12 18c-3.6 0-6.6-2-9-6 1.3-2.1 2.7-3.7 4.3-4.7m2.9-1.1A9 9 0 0 1 12 6c3.6 0 6.6 2 9 6-.7 1.1-1.4 2.1-2.1 2.9"/><path d="M3 3l18 18"/></svg><b>why did this tap?</b> · terminal not visible</span>
+          </div>
+        </div></div>
+      </div>
+    </div>
+    <p class="caption"><b>GATE agent</b> — approve / deny / redirect, right from the notch. The diff is the context; the buttons are the whole decision.</p>
+  </section>
+
+  <!-- ============ 06 DEGRADED CONSOLE · OBSERVE ============ -->
+  <section class="card">
+    <div class="clabel"><span class="cnum">06</span><span class="ctitle">Degraded console · OBSERVE-only lane</span><span class="cline"></span></div>
+    <div class="stage">
+      <div class="screen">
+        <div class="menubar">
+          <div class="mb-l">
+            <svg class="mi" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 13.5c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.15-2.8.85-3.5.85-.7 0-1.85-.83-3-.8-1.55.02-2.98.9-3.77 2.29-1.6 2.79-.41 6.92 1.15 9.19.76 1.11 1.67 2.35 2.86 2.31 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.13 2.76-2.24.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.42-3.65z"/><path d="M14.9 6.5c.64-.78 1.07-1.86.95-2.94-.92.04-2.03.61-2.69 1.39-.59.69-1.11 1.79-.97 2.85 1.02.08 2.07-.52 2.71-1.3z"/></svg>
+            <span class="brand">notchide</span><span>File</span><span>Edit</span><span>View</span>
+          </div>
+          <div class="mb-r">
+            <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="15" height="8" rx="2"/><path d="M19 10.5v3"/><rect x="4.3" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="7.6" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="10.9" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/></svg>
+            <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 18h.01"/><path d="M9.17 15.17a4 4 0 0 1 5.66 0"/><path d="M6.34 12.34a8 8 0 0 1 11.32 0"/><path d="M3.51 9.51c4.69-4.68 12.29-4.68 17 0"/></svg>
+            <span class="clock">9:41</span>
+          </div>
+        </div>
+        <svg class="notch" viewBox="0 0 420 74" aria-hidden="true">
+          <path d="M0,74 L0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44 L420,74 Z" fill="#1d1f27"/>
+          <path d="M0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44" fill="none" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+          <path d="M115,0 L305,0 L305,48 Q305,64 289,64 L131,64 Q115,64 115,48 Z" fill="#050608" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+        </svg>
+        <div class="nglow" aria-hidden="true"></div>
+        <div class="cockpit" aria-hidden="true">
+          <div class="agent"><span class="pb sm aider"><svg><use href="#ic-aider"/></svg></span><span class="sdot teal"></span></div>
+        </div>
+
+        <div class="panelwrap"><div class="panel">
+          <div class="row">
+            <span class="lead watch"><svg class="li" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.6"/></svg>observing · read-only</span>
+            <span class="chips">
+              <span class="chip prov"><span class="pb sm aider"><svg><use href="#ic-aider"/></svg></span>Aider</span>
+              <span class="chip mono"><svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l2-2h4l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></svg>~/work/payments-api</span>
+              <span class="cbadge observe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.6"/></svg>observe</span>
+            </span>
+          </div>
+
+          <div class="cmdlabel">just ran</div>
+          <div class="cmd calm">
+            <span class="pr">$</span>
+            <span class="t">pytest -q tests/payments</span>
+            <span class="tag neutral"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>exit 0 · read-only</span>
+          </div>
+
+          <div class="capbanner">
+            <svg class="bi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.6"/></svg>
+            <span class="txt"><b>Notify-only · log-tailed.</b> This provider exposes no approval hook, so notchide watches and alerts — it never shows a button it can&rsquo;t honor.</span>
+            <span class="rt">
+              <span class="cbadge observe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.6"/></svg>observe</span>
+              <button class="jump"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h4v4"/><path d="M20 4l-6 6"/><path d="M8 20H4v-4"/><path d="M4 20l6-6"/></svg>Jump to terminal</button>
+            </span>
+          </div>
+
+          <div class="divln"></div>
+
+          <div class="sech"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M3 12h5.8"/><path d="M15.2 12H21"/></svg>edited (read-only view)</div>
+          <div class="files">
+            <span class="file active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M10 13l-2 2 2 2"/><path d="M14 13l2 2-2 2"/></svg>refund.py · <span class="pl">+9</span> <span class="mn">−3</span></span>
+          </div>
+
+          <div class="diff">
+            <div class="hunk">@@ -22,6 +22,9 @@ def issue_refund(charge, amount)</div>
+            <div class="drow"><span class="ln">22</span><span class="sg"> </span><code class="cc">    <span class="k">def</span> <span class="f">issue_refund</span>(charge, amount):</code></div>
+            <div class="drow rem"><span class="ln">23</span><span class="sg">−</span><code class="cc">        <span class="k">return</span> gateway.<span class="f">refund</span>(charge.id, amount)</code></div>
+            <div class="drow add"><span class="ln">23</span><span class="sg">+</span><code class="cc">        <span class="k">if</span> amount &gt; charge.amount:</code></div>
+            <div class="drow add"><span class="ln">24</span><span class="sg">+</span><code class="cc">            <span class="k">raise</span> <span class="t">RefundError</span>(<span class="s">"over-refund"</span>)</code></div>
+            <div class="drow add"><span class="ln">25</span><span class="sg">+</span><code class="cc">        <span class="k">return</span> gateway.<span class="f">refund</span>(charge.id, amount, idem=key)</code></div>
+            <div class="drow"><span class="ln">26</span><span class="sg"> </span><code class="cc">    <span class="k">def</span> <span class="f">void</span>(charge):</code></div>
+          </div>
+
+          <div class="divln"></div>
+
+          <div class="sech"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 10h8M8 14h5"/><rect x="3" y="4" width="18" height="16" rx="3"/></svg>last message</div>
+          <div class="term">
+            <div class="l"><span class="pr">›</span> aider: added over-refund guard + idempotency key</div>
+            <div class="l"><span class="ok">✓</span> 3 tests added · <span class="dim">tests/payments/test_refund.py</span></div>
+            <div class="l"><span class="dim">awaiting your next instruction in the terminal…</span></div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+    <p class="caption"><b>Observe-only agent (Aider)</b> — honest degradation: no buttons it can&rsquo;t honor. Same layout, same diff — just no decision it isn&rsquo;t allowed to make.</p>
+  </section>
+
+  <!-- ============ 07 MULTI-SESSION STACK ============ -->
+  <section class="card">
+    <div class="clabel"><span class="cnum">07</span><span class="ctitle">Multi-session stack · expanded</span><span class="cline"></span></div>
+    <div class="stage">
+      <div class="screen">
+        <div class="menubar">
+          <div class="mb-l">
+            <svg class="mi" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 13.5c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.15-2.8.85-3.5.85-.7 0-1.85-.83-3-.8-1.55.02-2.98.9-3.77 2.29-1.6 2.79-.41 6.92 1.15 9.19.76 1.11 1.67 2.35 2.86 2.31 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.13 2.76-2.24.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.42-3.65z"/><path d="M14.9 6.5c.64-.78 1.07-1.86.95-2.94-.92.04-2.03.61-2.69 1.39-.59.69-1.11 1.79-.97 2.85 1.02.08 2.07-.52 2.71-1.3z"/></svg>
+            <span class="brand">notchide</span><span>File</span><span>Edit</span><span>View</span>
+          </div>
+          <div class="mb-r">
+            <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="15" height="8" rx="2"/><path d="M19 10.5v3"/><rect x="4.3" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="7.6" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="10.9" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/></svg>
+            <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 18h.01"/><path d="M9.17 15.17a4 4 0 0 1 5.66 0"/><path d="M6.34 12.34a8 8 0 0 1 11.32 0"/><path d="M3.51 9.51c4.69-4.68 12.29-4.68 17 0"/></svg>
+            <span class="clock">9:41</span>
+          </div>
+        </div>
+        <svg class="notch" viewBox="0 0 420 74" aria-hidden="true">
+          <path d="M0,74 L0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44 L420,74 Z" fill="#1d1f27"/>
+          <path d="M0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44" fill="none" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+          <path d="M115,0 L305,0 L305,48 Q305,64 289,64 L131,64 Q115,64 115,48 Z" fill="#050608" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+        </svg>
+        <div class="nglow" aria-hidden="true"></div>
+        <div class="cockpit" aria-hidden="true">
+          <div class="agent"><span class="pb sm claude"><svg><use href="#ic-claude"/></svg></span><span class="sdot amber"></span></div>
+          <div class="agent"><span class="pb sm cursor"><svg><use href="#ic-cursor"/></svg></span><span class="sdot red"></span></div>
+          <div class="agent"><span class="pb sm codex"><svg><use href="#ic-codex"/></svg></span><span class="sdot teal"></span></div>
+          <div class="agent"><span class="pb sm aider"><svg><use href="#ic-aider"/></svg></span><span class="sdot green"></span></div>
+        </div>
+
+        <div class="panelwrap"><div class="panel">
+          <div class="sech" style="margin-bottom:4px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/></svg>4 sessions · urgency-ordered</div>
+          <div class="sesslist">
+
+            <div class="srow">
+              <span class="gl"><span class="sdot amber"></span></span>
+              <span class="pb md claude"><svg><use href="#ic-claude"/></svg></span>
+              <span class="meta">
+                <span class="m1">Claude Code <span class="br">feat/payments</span></span>
+                <span class="m2">wants to run <span class="mono">git push --force origin</span></span>
+              </span>
+              <span class="rgt"><span class="statuschip amber">needs you</span></span>
+            </div>
+
+            <div class="srow">
+              <span class="gl"><span class="sdot red"></span></span>
+              <span class="pb md cursor"><svg><use href="#ic-cursor"/></svg></span>
+              <span class="meta">
+                <span class="m1">Cursor <span class="br">spike/rag</span></span>
+                <span class="m2">build failed <span class="mono">tsc — 3 errors</span></span>
+              </span>
+              <span class="rgt"><span class="statuschip red">error</span></span>
+            </div>
+
+            <div class="srow">
+              <span class="gl"><span class="sdot teal"></span></span>
+              <span class="pb md codex"><svg><use href="#ic-codex"/></svg></span>
+              <span class="meta">
+                <span class="m1">Codex <span class="br">fix/auth</span></span>
+                <span class="m2">editing <span class="mono">AuthMiddleware.ts</span> · 2 subagents</span>
+              </span>
+              <span class="rgt"><span class="statuschip teal">flowing</span>
+                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+              </span>
+            </div>
+            <div class="subwrap">
+              <div class="subrow">
+                <span class="gl"><span class="sdot teal"></span></span>
+                <span class="pb sm codex"><svg><use href="#ic-codex"/></svg></span>
+                <span class="meta"><span class="m1">subagent · tests</span><span class="m2"><span class="mono">vitest run auth/*</span></span></span>
+                <span class="rgt"><span class="statuschip teal">running</span></span>
+              </div>
+            </div>
+
+            <div class="srow">
+              <span class="gl"><span class="sdot green"></span></span>
+              <span class="pb md aider"><svg><use href="#ic-aider"/></svg></span>
+              <span class="meta">
+                <span class="m1">Aider <span class="br">chore/deps</span></span>
+                <span class="m2">done · 12 files updated, tests green</span>
+              </span>
+              <span class="rgt"><span class="statuschip green">done</span></span>
+            </div>
+
+          </div>
+        </div></div>
+      </div>
+    </div>
+    <p class="caption"><b>Multiple sessions</b> — pick the one that needs you. Same glyphs as the collapsed pill, now with a line of context each.</p>
+  </section>
+
+  <!-- ============ 08 FLOATING FALLBACK ============ -->
+  <section class="card">
+    <div class="clabel"><span class="cnum">08</span><span class="ctitle">Floating fallback · external display</span><span class="cline"></span></div>
+    <div class="stage">
+      <div class="extscreen">
+        <div class="menubar">
+          <div class="mb-l"><span class="brand">Studio Display</span><span>File</span><span>Edit</span><span>View</span></div>
+          <div class="mb-r">
+            <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 18h.01"/><path d="M9.17 15.17a4 4 0 0 1 5.66 0"/><path d="M6.34 12.34a8 8 0 0 1 11.32 0"/><path d="M3.51 9.51c4.69-4.68 12.29-4.68 17 0"/></svg>
+            <span class="clock">9:41</span>
+          </div>
+        </div>
+        <div class="ghost l" aria-hidden="true" style="top:80px;left:52px"><div class="bar"><span class="gd"></span><span class="gd"></span><span class="gd"></span><span class="gu"></span></div><div class="gb"></div></div>
+
+        <div class="island">
+          <div class="ihead">
+            <span class="grab" aria-hidden="true"></span>
+            <div class="icock" aria-hidden="true">
+              <div class="agent"><span class="pb sm claude"><svg><use href="#ic-claude"/></svg></span><span class="sdot amber"></span></div>
+              <div class="agent"><span class="pb sm codex"><svg><use href="#ic-codex"/></svg></span><span class="sdot teal"></span></div>
+              <div class="agent"><span class="pb sm aider"><svg><use href="#ic-aider"/></svg></span><span class="sdot green"></span></div>
+            </div>
+            <span class="ihl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>floating island</span>
+          </div>
+          <div class="ibody">
+            <div class="row">
+              <span class="lead needs"><svg class="li" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 2.5v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9v-5z"/><circle cx="12" cy="11" r="1.4"/><path d="M12 12.4v2.2"/></svg>permission requested</span>
+              <span class="chips">
+                <span class="chip prov"><span class="pb sm claude"><svg><use href="#ic-claude"/></svg></span>Claude Code</span>
+                <span class="chip mono"><svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9l3 3l-3 3"/><path d="M13 15h4"/></svg>Bash</span>
+              </span>
+            </div>
+            <div class="cmdlabel">wants to run</div>
+            <div class="cmd">
+              <span class="pr">$</span><span class="t"><span class="dg">rm -rf</span> build/</span>
+              <span class="tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5L21 19.5H3z"/><path d="M12 10v4"/><path d="M12 17h.01"/></svg>destructive</span>
+            </div>
+            <div class="diff" style="margin-top:12px">
+              <div class="hunk">@@ -14,4 +14,5 @@ charge(_:to:)</div>
+              <div class="drow rem"><span class="ln">14</span><span class="sg">−</span><code class="cc">    <span class="k">let</span> cents = <span class="t">Int</span>(amount * 100)</code></div>
+              <div class="drow add"><span class="ln">14</span><span class="sg">+</span><code class="cc">    <span class="k">let</span> cents = <span class="t">NSDecimalNumber</span>(...).<span class="f">intValue</span></code></div>
+              <div class="drow add"><span class="ln">15</span><span class="sg">+</span><code class="cc">    <span class="k">try</span> <span class="k">await</span> rateLimiter.<span class="f">acquire</span>(...)</code></div>
+            </div>
+            <div class="actions">
+              <button class="btn deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>Deny</button>
+              <button class="btn approve"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>Approve</button>
+              <button class="btn remember"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9.83 9.17a4 4 0 1 0 0 5.66a10 10 0 0 0 2.17-2.83a10 10 0 0 1 2.17-2.83a4 4 0 1 1 0 5.66a10 10 0 0 1-2.17-2.83a10 10 0 0 0-2.17-2.83"/></svg>&amp; remember</button>
+            </div>
+          </div>
+        </div>
+
+        <span class="extbadge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>no notch on this display</span>
+      </div>
+    </div>
+    <p class="caption"><b>External display</b> — a first-class floating island, never a faked notch. Same glyph vocabulary, same grow-downward metaphor.</p>
+  </section>
+
+  <!-- ============ 09 CONNECTIONS ============ -->
+  <section class="card">
+    <div class="clabel"><span class="cnum">09</span><span class="ctitle">Connections · provider grid</span><span class="cline"></span></div>
+    <div class="stage">
+      <div class="moscene">
+        <div class="menubar">
+          <div class="mb-l">
+            <svg class="mi" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 13.5c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.15-2.8.85-3.5.85-.7 0-1.85-.83-3-.8-1.55.02-2.98.9-3.77 2.29-1.6 2.79-.41 6.92 1.15 9.19.76 1.11 1.67 2.35 2.86 2.31 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.13 2.76-2.24.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.42-3.65z"/><path d="M14.9 6.5c.64-.78 1.07-1.86.95-2.94-.92.04-2.03.61-2.69 1.39-.59.69-1.11 1.79-.97 2.85 1.02.08 2.07-.52 2.71-1.3z"/></svg>
+            <span class="brand">notchide</span>
+          </div>
+          <div class="mb-r"><span class="clock">9:41</span></div>
+        </div>
+        <div class="scrim" aria-hidden="true"></div>
+
+        <div class="modal">
+          <div class="msearch">
+            <svg class="si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+            <span class="sq">connect an agent<span class="caret"></span></span>
+            <span class="count"><b>3</b>/5 connected</span>
+          </div>
+          <div class="mgrid">
+
+            <div class="tile t-claude connected">
+              <div class="tico"><svg viewBox="0 0 24 24"><use href="#ic-claude"/></svg></div>
+              <div class="tn">Claude Code</div>
+              <div class="ts"><span class="dot"></span>connected</div>
+            </div>
+
+            <div class="tile t-codex connecting">
+              <div class="tico"><svg viewBox="0 0 24 24"><use href="#ic-codex"/></svg></div>
+              <div class="tn">Codex</div>
+              <div class="ts"><span class="spinner"></span>connecting…</div>
+            </div>
+
+            <div class="tile t-cursor hovered">
+              <div class="tico"><svg viewBox="0 0 24 24"><use href="#ic-cursor"/></svg></div>
+              <div class="tn">Cursor</div>
+              <div class="ts"><span class="dot" style="background:#7ea6ff"></span>connect</div>
+            </div>
+
+            <div class="tile t-aider">
+              <div class="tico"><svg viewBox="0 0 24 24"><use href="#ic-aider"/></svg></div>
+              <div class="tn">Aider</div>
+              <div class="ts"><span class="dot" style="background:#54cf95"></span>connected · observe</div>
+            </div>
+
+            <div class="tile t-openclaw">
+              <div class="tico"><svg viewBox="0 0 24 24"><use href="#ic-openclaw"/></svg></div>
+              <div class="tn">OpenClaw</div>
+              <div class="ts"><span class="dot" style="background:#54cf95"></span>connected</div>
+            </div>
+
+            <div class="tile add">
+              <div class="plus"><svg viewBox="0 0 24 24"><use href="#ic-plus"/></svg></div>
+              <div class="tn">Add custom agent…</div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="caption"><b>Connect anything</b> — drop a provider, inherit the whole cockpit. Every tile speaks the same status grammar the moment it&rsquo;s wired.</p>
+  </section>
+
+  <!-- ============ 10 CAPABILITY LEGEND ============ -->
+  <section class="card">
+    <div class="clabel"><span class="cnum">10</span><span class="ctitle">Capability legend</span><span class="cline"></span></div>
+    <div class="stage">
+      <div class="legend">
+        <div class="leg-group grow">
+          <div class="leg-title">Status glyphs</div>
+          <div class="leg-items">
+            <span class="leg-item"><span class="sdot teal"></span><span class="lbl"><b>flowing</b><span>agent is working</span></span></span>
+            <span class="leg-item"><span class="sdot amber"></span><span class="lbl"><b>needs-you</b><span>blocked on your call</span></span></span>
+            <span class="leg-item"><span class="sdot green"></span><span class="lbl"><b>done</b><span>finished, clean</span></span></span>
+            <span class="leg-item"><span class="sdot red"></span><span class="lbl"><b>error</b><span>failed, wants eyes</span></span></span>
+          </div>
+        </div>
+        <div class="leg-sep" aria-hidden="true"></div>
+        <div class="leg-group">
+          <div class="leg-title">Capability lanes</div>
+          <div class="leg-caps">
+            <div class="leg-cap"><span class="cbadge observe"><svg viewBox="0 0 24 24"><use href="#ic-eye"/></svg>observe</span><span class="meaning"><b>Watch &amp; notify</b>read-only diff + alerts</span></div>
+            <div class="leg-cap"><span class="cbadge gate"><svg viewBox="0 0 24 24"><use href="#ic-shield"/></svg>gate</span><span class="meaning"><b>Approve · deny · redirect</b>you hold the button</span></div>
+            <div class="leg-cap"><span class="cbadge actuate"><svg viewBox="0 0 24 24"><use href="#ic-bolt"/></svg>actuate</span><span class="meaning"><b>Runs actions for you</b>within the limits you set</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="caption"><b>One grammar across every agent</b> — the same four glyphs and three lanes, whatever provider is behind them.</p>
+  </section>
+
+  <div class="gfoot">
+    <span class="sq"></span><span class="wm">notchide</span>
+    <span class="dv">·</span><span>the open notch platform for coding agents</span>
+    <span class="dv">·</span><span>display system reference · 10 states</span>
+  </div>
+
+</div>
+</body></html>

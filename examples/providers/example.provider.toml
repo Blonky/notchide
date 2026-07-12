@@ -1,0 +1,37 @@
+# example.provider.toml — an AAP provider manifest template.
+#
+# Drop a manifest at:
+#   ~/Library/Application Support/notchide/providers/<name>/provider.toml
+# (or provider.json — see example.provider.json). notchide scans that directory
+# on launch and records the provider's DESCRIPTOR: its identity, capabilities,
+# and decision capability. This is the "Tier-0" way to make a provider known.
+#
+# What a manifest does (and does not) do:
+#   * It lets the app CLASSIFY a provider's lanes correctly — in particular
+#     whether the provider may gate (blocking) or is notify-only — even before
+#     any of its events arrive over the socket.
+#   * It does NOT start a live provider. Swift has no dynamic code loading, so a
+#     manifest contributes a descriptor only; the running events still arrive
+#     from an adapter over the AAP socket (see docs/PROTOCOL.md).
+#
+# Parser notes (from ProviderRegistry.ProviderManifest):
+#   * A tiny TOML subset is supported: `key = "value"` and `key = ["a", "b"]`.
+#     Blank lines, `#` comments, and `[section]` headers are ignored.
+#   * Only the four keys below are recognized; any other key is ignored. There is
+#     no glyph-mapping key — descriptors always use the fixed four-state palette.
+
+# REQUIRED. Stable reverse-DNS identity. A manifest with no/empty id is skipped.
+id = "com.example.agent"
+
+# Optional. Human-readable name shown in the cockpit. Defaults to `id` if absent.
+displayName = "Example Agent"
+
+# Optional. What this provider can do. Recognized values: "observe", "gate",
+# "actuate". Unknown values are dropped. Advertising "gate" is what makes a
+# provider able to block the agent on a decision (and reach the needsYou state).
+capabilities = ["observe", "gate"]
+
+# Optional. "blocking" or "notifyOnly". When omitted (or unrecognized) it is
+# DERIVED from `capabilities`: blocking if "gate" is present, else notifyOnly.
+# Set it explicitly only to be unambiguous; the line below matches the derivation.
+decisionCapability = "blocking"

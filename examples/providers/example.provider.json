@@ -1,0 +1,7 @@
+{
+  "_comment": "JSON fallback for an AAP provider manifest. Drop at ~/Library/Application Support/notchide/providers/<name>/provider.json (a sibling provider.toml wins if both exist). Recognized keys: id (required, string), displayName (optional, string, defaults to id), capabilities (optional, string array of observe/gate/actuate; unknown dropped), decisionCapability (optional, 'blocking' or 'notifyOnly'; derived from whether capabilities includes 'gate' when absent). Any other key (including this _comment) is ignored. There is no glyph-mapping key. See example.provider.toml and docs/PROTOCOL.md.",
+  "id": "com.example.agent",
+  "displayName": "Example Agent",
+  "capabilities": ["observe", "gate"],
+  "decisionCapability": "blocking"
+}

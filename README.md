@@ -2,7 +2,9 @@
 
 # notchide
 
-**Mission control for your coding agents, in the notch.**
+**The open notch platform for coding agents.**
+Connect Claude Code, Codex, Cursor, Aider, or your own agent — and approve, deny, or redirect
+from the notch, over your fullscreen work.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-black.svg)](./LICENSE)
 [![Platform: macOS 13+](https://img.shields.io/badge/platform-macOS%2013%2B-black.svg)](#compatibility)
@@ -20,9 +22,15 @@
 ---
 
 notchide turns the MacBook notch into an ambient cockpit for your AI coding agents.
-It watches every Claude Code session across every Space, taps you **only** when one is
-blocked waiting on a permission, and unfurls a live-diff + approve panel right out of the
-notch — so you never leave the app you're in.
+It watches every session across every Space, taps you **only** when one is blocked waiting on a
+permission, and unfurls a live-diff + approve panel right out of the notch — so you never leave
+the app you're in.
+
+It is **agent-agnostic**: agents connect over a small, documented wire protocol —
+**[AAP, the Agent Adapter Protocol](docs/PROTOCOL.md)**. Claude Code is the reference adapter that
+ships today; Codex, Cursor, Aider, or your own agent connect the same way (see
+[Connect any agent](#connect-any-agent)). Everything is **local-first**: a same-machine,
+owner-only Unix socket, nothing routable.
 
 It does two verbs — **NOTIFY** and **DECIDE** — and deliberately never the third,
 **CREATE**. There is no code editor in notchide. It is a cockpit, not an IDE.
@@ -62,6 +70,25 @@ stealing focus.
   avoid. Pulling the notch console down never takes your keyboard unless you click into the
   reply field.
 
+## Connect any agent
+
+notchide is a platform, not a single-agent tool. An agent connects by speaking **AAP** — it
+opens the local socket, sends a one-line handshake, and streams events. It does **not** link
+notchide and can be written in any language.
+
+- **Wire protocol:** [docs/PROTOCOL.md](docs/PROTOCOL.md) — the normative `aap/1` spec (handshake,
+  envelope, decision; NDJSON over an owner-only Unix socket; UUID correlation; fail-open).
+- **Schema:** [schema/aap-1.schema.json](schema/aap-1.schema.json).
+- **Runnable examples:** [examples/adapters/](examples/adapters) (a ~40-line reference adapter)
+  and [examples/providers/](examples/providers) (drop-in provider manifests).
+
+**Capability model (one line).** An adapter advertises what it can do: **`observe`** (report
+status — read-only) and/or **`gate`** (block the agent awaiting your decision). Only a `gate`
+adapter can reach `needs-you` and show Approve/Deny/redirect; an observe-only adapter is
+*notify-only* and structurally cannot seize you.
+
+Claude Code ships in v0.1; other agents are the documented [roadmap](docs/ROADMAP.md).
+
 ## Features (v0.1)
 
 - **Four-state glyph cockpit** — one pre-attentive glyph per session (`flowing` / `needs-you`
@@ -93,10 +120,10 @@ same still-open socket.
    (MIT) for the `NSPanel` geometry, the animatable notch-shape morph, and the floating-pill
    fallback. A thin `NotchController` owns the collapsed pill, the expanded console, the
    hover-intent state machine, ESC/pin/auto-collapse timers, and a global summon hotkey.
-2. **Ingest** — the `notchide-hook` sidecar CLI (installed into Claude Code hooks) forwards
-   hook events over a Unix-domain socket at
-   `~/Library/Application Support/notchide/hook.sock` (mode `0600`) to a `SessionStore` actor,
-   one lane per session.
+2. **Ingest** — agents connect over AAP to a Unix-domain socket at
+   `~/Library/Application Support/notchide/agent.sock` (mode `0600`). `SocketAAPProvider` and the
+   `ProviderRegistry` fan every provider's events into a `SessionStore` actor, one lane per
+   session. The `notchide-hook` CLI is the reference adapter for Claude Code.
 3. **Attention Router** — a `Suppressor` escalates a lane to `needs-you` only when its
    terminal is not frontmost on the active Space. It drives the four-state glyph machine.
 4. **Review Surface** — SwiftUI. Renders the pending command, the decision buttons and the
@@ -112,7 +139,7 @@ same still-open socket.
   │ permission   │──────────────┐                    │  SessionStore actor  │
   │ gate         │              ▼                     │  (one lane / session)│
   └──────────────┘        ┌───────────┐   unix sock   │          │           │
-        ▲                 │notchide-  │  hook.sock ───▶│   lane → needs-you   │
+        ▲                 │notchide-  │ agent.sock ───▶│   lane → needs-you   │
         │  hook prints    │  hook CLI │  (NDJSON,0600) │          │           │
         │  decision JSON, │(fail-open,│               │          ▼           │
         │  exits 0        │  blocks)  │◀── decision ───│      Suppressor      │
@@ -219,25 +246,32 @@ deliberately click into the reply field.
 
 ## Roadmap
 
-- **v0.1 — the wedge (Claude Code only):** notch shell + floating fallback, four-state glyph
-  cockpit, Claude Code hook→socket bridge, smart suppression, read-only review console
+- **Foundation — AAP (landed in the core):** the vendor-neutral Agent Adapter Protocol
+  ([docs/PROTOCOL.md](docs/PROTOCOL.md)) — `AgentEvent`/capability model, `aap/1` wire format,
+  `SocketAAPProvider` + provider registry/manifests, Claude Code as the reference provider.
+- **v0.1 — the wedge (Claude Code ships):** notch shell + floating fallback, four-state glyph
+  cockpit, Claude Code adapter over the AAP socket, smart suppression, read-only review console
   (command + Approve/Deny/redirect + live git diff + output tail), jump-to-terminal,
   one-command reversible installer, notarized `.dmg` + demo GIF, Show HN.
-- **v0.2:** OpenTelemetry OTLP `:4318` passive listener (multi-agent, incl. Codex) →
-  token/cost/tool-timeline in the cockpit; usage-% glyph; inline reply-inject behind a flag;
-  optional SwiftTerm terminal peek; multi-session stack view.
+- **v0.2:** a second **built-in** provider — an OpenTelemetry OTLP `:4318` passive listener
+  (notify-only, incl. Codex) proving the abstraction — plus a multi-session stack view,
+  token/cost/tool-timeline, usage-% glyph, inline reply-inject behind a flag, and an optional
+  SwiftTerm terminal peek.
 - **v0.3:** builds / CI / git (Xcode build status, `gh` PR/CI checks), a NotchFlow-style
   worktree browser tying sessions to branches, optional on-demand inline editing.
-- **v1.0:** a documented local-socket plugin protocol + community adapters (Cursor, Aider,
-  custom agents); hardened private-framework feature-detection across macOS point releases.
+- **v1.0:** freeze `aap/1` + publish the adapter SDK + community adapters (Codex, Cursor, Aider,
+  OpenClaw, custom agents); hardened private-framework feature-detection across macOS point
+  releases.
 
 The full milestone breakdown is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Architecture
 
-The engineering view — package layout, key types, the concurrency model, and the IPC wire
-protocol — is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The product + system design of
-record is in [docs/DESIGN.md](docs/DESIGN.md).
+The engineering view — package layout, the two platform planes, key types, and the concurrency
+model — is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); the normative wire protocol is in
+[docs/PROTOCOL.md](docs/PROTOCOL.md); the product + system design of record is in
+[docs/DESIGN.md](docs/DESIGN.md). See [docs/media/gallery.html](docs/media/gallery.html) for the
+full display system.
 
 ## Contributing
 
