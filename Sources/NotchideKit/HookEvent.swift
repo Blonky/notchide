@@ -147,20 +147,6 @@ public struct HookEvent: Codable, Sendable, Equatable {
 
 // MARK: - PreToolUse decision output
 
-/// The permission decision a PreToolUse hook can return to Claude Code.
-///
-/// Confirmed values from https://code.claude.com/docs/en/hooks:
-/// `"allow"` approves the call, `"deny"` blocks it, `"ask"` escalates to the
-/// user's normal permission prompt. (Claude Code also documents `"defer"` to
-/// fall back to the default flow; notchide expresses that by emitting no
-/// decision at all — see `notchide-hook`'s fail-open contract — so it is not
-/// part of this enum.)
-public enum PermissionDecision: String, Codable, Sendable {
-    case allow
-    case deny
-    case ask
-}
-
 /// The PreToolUse decision output, serialized to the modern
 /// `hookSpecificOutput` schema that Claude Code expects on stdout:
 ///

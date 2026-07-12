@@ -1,37 +1,67 @@
 import Foundation
 
-/// Wire message sent from the `notchide-hook` CLI to the app's socket server.
+/// The AAP connection handshake — the FIRST NDJSON line on every connection.
 ///
-/// One envelope carries a single decoded hook event plus whether the CLI is
-/// blocking on a decision (only PreToolUse permission gates do).
-public struct HookEnvelope: Codable, Sendable, Equatable {
+/// ```json
+/// {"aap":"1","providerID":"sh.claude","capabilities":["gate","observe"]}
+/// ```
+///
+/// The server validates `aap == "1"`, records the advertised `capabilities`, and
+/// ignores decision escalation from any provider that did not advertise `gate`.
+/// Decoding is lenient: a missing version degrades to an empty string (which
+/// fails validation), and unknown capability strings are dropped rather than
+/// throwing — so a newer client cannot crash the handshake.
+public struct AAPHandshake: Codable, Sendable, Equatable {
+    /// The AAP wire version this build speaks/accepts.
+    public static let version = "1"
+
+    public let aap: String
+    public let providerID: ProviderID
+    public let capabilities: Set<Capability>
+
+    public init(providerID: ProviderID, capabilities: Set<Capability>, aap: String = AAPHandshake.version) {
+        self.aap = aap
+        self.providerID = providerID
+        self.capabilities = capabilities
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case aap, providerID, capabilities
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.aap = (try? container.decode(String.self, forKey: .aap)) ?? ""
+        self.providerID = (try? container.decode(ProviderID.self, forKey: .providerID)) ?? ProviderID("")
+        let rawCapabilities = (try? container.decode([String].self, forKey: .capabilities)) ?? []
+        self.capabilities = Set(rawCapabilities.compactMap(Capability.init(rawValue:)))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(aap, forKey: .aap)
+        try container.encode(providerID, forKey: .providerID)
+        try container.encode(capabilities.map(\.rawValue).sorted(), forKey: .capabilities)
+    }
+
+    /// Whether this handshake is a version the server accepts.
+    public var isSupportedVersion: Bool { aap == AAPHandshake.version }
+}
+
+/// Wire message carrying one `AgentEvent` from an AAP adapter to the app.
+///
+/// `wantsDecision` is set only when the adapter is blocking on a decision (a
+/// `gate` provider's `.needsDecision`); `id` correlates the eventual
+/// `AgentDecision` reply. Generalizes the old `HookEnvelope`.
+public struct AgentEnvelope: Codable, Sendable, Equatable {
     public let id: UUID
-    public let event: HookEvent
+    public let event: AgentEvent
     public let wantsDecision: Bool
 
-    public init(id: UUID = UUID(), event: HookEvent, wantsDecision: Bool) {
+    public init(id: UUID = UUID(), event: AgentEvent, wantsDecision: Bool) {
         self.id = id
         self.event = event
         self.wantsDecision = wantsDecision
-    }
-}
-
-/// Wire message sent from the app back to the `notchide-hook` CLI in response
-/// to an envelope with `wantsDecision == true`.
-///
-/// `redirect` is an app-level concept (steer the agent elsewhere); the CLI maps
-/// `permission`/`reason` onto the Claude Code PreToolUse decision output.
-public struct DecisionMessage: Codable, Sendable, Equatable {
-    public let id: UUID
-    public let permission: PermissionDecision
-    public let reason: String?
-    public let redirect: String?
-
-    public init(id: UUID, permission: PermissionDecision, reason: String? = nil, redirect: String? = nil) {
-        self.id = id
-        self.permission = permission
-        self.reason = reason
-        self.redirect = redirect
     }
 }
 
@@ -97,9 +127,16 @@ public enum NotchidePaths {
             .appendingPathComponent("notchide", isDirectory: true)
     }
 
-    /// The canonical hook socket path:
-    /// `~/Library/Application Support/notchide/hook.sock`
+    /// The canonical agent socket path:
+    /// `~/Library/Application Support/notchide/agent.sock`
     public static var socketPath: String {
+        supportDirectory.appendingPathComponent("agent.sock").path
+    }
+
+    /// The legacy socket name (`hook.sock`) from before the AAP generalization.
+    /// Kept as an alias for back-compat: the app may additionally listen here so
+    /// an older adapter that still targets the old path keeps working.
+    public static var legacySocketPath: String {
         supportDirectory.appendingPathComponent("hook.sock").path
     }
 

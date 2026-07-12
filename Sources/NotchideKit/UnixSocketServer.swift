@@ -4,11 +4,13 @@ import Darwin
 /// A Unix-domain-socket server built on low-level POSIX (`socket`/`bind`/
 /// `listen`/`accept`).
 ///
-/// It listens on a filesystem socket path, accepts connections, reads
-/// newline-delimited `HookEnvelope`s, and hands each to an injected async
-/// handler. If the handler returns a `DecisionMessage` and the envelope
-/// requested a decision (`wantsDecision == true`), the message is written back
-/// on the same connection.
+/// It listens on a filesystem socket path and accepts connections. Each
+/// connection begins with an AAP handshake (`AAPHandshake`); the server validates
+/// the version and records the advertised capabilities. Subsequent lines are
+/// `AgentEnvelope`s handed to an injected async handler. If the handler returns
+/// an `AgentDecision`, the envelope requested a decision (`wantsDecision`), AND
+/// the provider advertised `gate`, the decision is written back on the same
+/// connection.
 ///
 /// Concurrency model: the accept loop and each connection run on their own
 /// dedicated `Thread`s using blocking POSIX I/O (never on the Swift cooperative
@@ -16,10 +18,17 @@ import Darwin
 /// that legitimately blocks for minutes (a human deciding on a permission gate)
 /// only ties up that one connection thread, not the whole server.
 public final class UnixSocketServer: @unchecked Sendable {
-    public typealias Handler = @Sendable (HookEnvelope) async -> DecisionMessage?
+    /// Invoked for every received envelope, given the connection's negotiated
+    /// capabilities. Return an `AgentDecision` to answer a blocking (`gate` +
+    /// `wantsDecision`) client; return `nil` to send nothing back.
+    public typealias Handler = @Sendable (_ envelope: AgentEnvelope, _ capabilities: Set<Capability>) async -> AgentDecision?
+    /// Invoked once per connection with its validated handshake, before any
+    /// envelopes are processed.
+    public typealias HandshakeObserver = @Sendable (_ handshake: AAPHandshake) async -> Void
 
     public let socketPath: String
     private let handler: Handler
+    private let onHandshake: HandshakeObserver?
 
     private let lock = NSLock()
     private var running = false
@@ -27,11 +36,16 @@ public final class UnixSocketServer: @unchecked Sendable {
 
     /// - Parameters:
     ///   - socketPath: Filesystem path to bind. Overridable for tests.
-    ///   - handler: Async handler invoked for every received envelope. Return a
-    ///     `DecisionMessage` to answer a blocking (`wantsDecision`) client;
-    ///     return `nil` to send nothing back.
-    public init(socketPath: String = NotchidePaths.socketPath, handler: @escaping Handler) {
+    ///   - onHandshake: Optional callback invoked with each connection's
+    ///     validated handshake (used to register the provider's capabilities).
+    ///   - handler: Async handler invoked for every received envelope.
+    public init(
+        socketPath: String = NotchidePaths.socketPath,
+        onHandshake: HandshakeObserver? = nil,
+        handler: @escaping Handler
+    ) {
         self.socketPath = socketPath
+        self.onHandshake = onHandshake
         self.handler = handler
     }
 
@@ -146,28 +160,52 @@ public final class UnixSocketServer: @unchecked Sendable {
             // Each connection gets its own thread so a slow handler (e.g. a
             // human deciding a permission gate) cannot block other connections.
             let connectionHandler = handler
+            let connectionHandshake = onHandshake
             Thread.detachNewThread {
-                UnixSocketServer.handleConnection(fd: clientFD, handler: connectionHandler)
+                UnixSocketServer.handleConnection(
+                    fd: clientFD, handler: connectionHandler, onHandshake: connectionHandshake)
             }
         }
     }
 
-    private static func handleConnection(fd: Int32, handler: @escaping Handler) {
+    private static func handleConnection(
+        fd: Int32,
+        handler: @escaping Handler,
+        onHandshake: HandshakeObserver?
+    ) {
         defer { close(fd) }
         let reader = FDLineReader(fd: fd)
+
+        // ── AAP handshake: the first line MUST be a supported handshake ────────
+        // An absent, malformed, or wrong-version handshake closes the connection
+        // (the client then sees EOF and falls open). An `AgentEnvelope` frame has
+        // no `aap` field, so it can never be mistaken for a valid handshake.
+        let firstLine = reader.nextLine()
+        guard case .line(let handshakeBytes) = firstLine,
+              let handshake = try? JSONDecoder().decode(AAPHandshake.self, from: Data(handshakeBytes)),
+              handshake.isSupportedVersion else {
+            return
+        }
+        if let onHandshake {
+            runBlocking { await onHandshake(handshake) }
+        }
+        let capabilities = handshake.capabilities
+
         loop: while true {
             switch reader.nextLine() {
             case .closed, .timedOut:
                 break loop
             case .line(let bytes):
                 if bytes.isEmpty { continue }
-                guard let envelope = try? JSONDecoder().decode(HookEnvelope.self, from: Data(bytes)) else {
+                guard let envelope = try? JSONDecoder().decode(AgentEnvelope.self, from: Data(bytes)) else {
                     continue // skip malformed frame, keep the connection open
                 }
-                // The handler is always invoked (it may update app state);
-                // a reply is only written when the client is blocking on one.
-                let decision = runBlocking { await handler(envelope) }
-                if envelope.wantsDecision, let decision, let frame = try? NDJSON.encode(decision) {
+                // A decision reply is only ever written to a provider that
+                // asked for one AND advertised `gate`; escalation from a
+                // non-gate provider is ignored.
+                let decisionAllowed = envelope.wantsDecision && capabilities.contains(.gate)
+                let decision = runBlocking { await handler(envelope, capabilities) }
+                if decisionAllowed, let decision, let frame = try? NDJSON.encode(decision) {
                     writeAllBytes(fd: fd, Array(frame))
                 }
             }

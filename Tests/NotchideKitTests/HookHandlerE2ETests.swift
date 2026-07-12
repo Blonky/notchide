@@ -110,8 +110,8 @@ struct HookHandlerE2ETests {
     func allowDecision() throws {
         let binary = try requireBinary()
         let socketPath = uniqueSocketPath()
-        let server = UnixSocketServer(socketPath: socketPath) { envelope in
-            DecisionMessage(id: envelope.id, permission: .allow, reason: "trusted by test")
+        let server = UnixSocketServer(socketPath: socketPath) { envelope, _ in
+            AgentDecision(id: envelope.id, verdict: .allow, reason: "trusted by test")
         }
         try server.start()
         defer { server.stop() }
@@ -136,8 +136,8 @@ struct HookHandlerE2ETests {
     func denyDecision() throws {
         let binary = try requireBinary()
         let socketPath = uniqueSocketPath()
-        let server = UnixSocketServer(socketPath: socketPath) { envelope in
-            DecisionMessage(id: envelope.id, permission: .deny, reason: "Destructive command blocked by hook")
+        let server = UnixSocketServer(socketPath: socketPath) { envelope, _ in
+            AgentDecision(id: envelope.id, verdict: .deny, reason: "Destructive command blocked by hook")
         }
         try server.start()
         defer { server.stop() }
@@ -161,8 +161,8 @@ struct HookHandlerE2ETests {
     func askDecision() throws {
         let binary = try requireBinary()
         let socketPath = uniqueSocketPath()
-        let server = UnixSocketServer(socketPath: socketPath) { envelope in
-            DecisionMessage(id: envelope.id, permission: .ask, reason: "please confirm")
+        let server = UnixSocketServer(socketPath: socketPath) { envelope, _ in
+            AgentDecision(id: envelope.id, verdict: .ask, reason: "please confirm")
         }
         try server.start()
         defer { server.stop() }
@@ -185,9 +185,9 @@ struct HookHandlerE2ETests {
     func redirectNeverEmitted() throws {
         let binary = try requireBinary()
         let socketPath = uniqueSocketPath()
-        let server = UnixSocketServer(socketPath: socketPath) { envelope in
-            DecisionMessage(id: envelope.id, permission: .deny,
-                            reason: "blocked", redirect: "https://internal/redirect-target")
+        let server = UnixSocketServer(socketPath: socketPath) { envelope, _ in
+            AgentDecision(id: envelope.id, verdict: .deny,
+                          reason: "blocked", redirect: "https://internal/redirect-target")
         }
         try server.start()
         defer { server.stop() }
@@ -230,7 +230,7 @@ struct HookHandlerE2ETests {
         let binary = try requireBinary()
         let socketPath = uniqueSocketPath()
         // Handler returns nil → server writes nothing → client must time out.
-        let server = UnixSocketServer(socketPath: socketPath) { _ in nil }
+        let server = UnixSocketServer(socketPath: socketPath) { _, _ in nil }
         try server.start()
         defer { server.stop() }
 
@@ -258,8 +258,8 @@ struct HookHandlerE2ETests {
         let socketPath = uniqueSocketPath()
         let received = UncheckedBox<Bool>(false)
         let gotIt = DispatchSemaphore(value: 0)
-        let server = UnixSocketServer(socketPath: socketPath) { envelope in
-            if envelope.event.hookEventName == .notification {
+        let server = UnixSocketServer(socketPath: socketPath) { envelope, _ in
+            if envelope.event.kind == .notified {
                 received.value = true
                 gotIt.signal()
             }
@@ -289,8 +289,8 @@ struct HookHandlerE2ETests {
     func positionalEventNameOverridesPayload() throws {
         let binary = try requireBinary()
         let socketPath = uniqueSocketPath()
-        let server = UnixSocketServer(socketPath: socketPath) { envelope in
-            DecisionMessage(id: envelope.id, permission: .deny, reason: "overridden to blocking")
+        let server = UnixSocketServer(socketPath: socketPath) { envelope, _ in
+            AgentDecision(id: envelope.id, verdict: .deny, reason: "overridden to blocking")
         }
         try server.start()
         defer { server.stop() }
@@ -316,9 +316,9 @@ struct HookHandlerE2ETests {
     func positionalEventNameDowngradesToFireAndForget() throws {
         let binary = try requireBinary()
         let socketPath = uniqueSocketPath()
-        let server = UnixSocketServer(socketPath: socketPath) { envelope in
+        let server = UnixSocketServer(socketPath: socketPath) { envelope, _ in
             // Even if we would decide, a fire-and-forget client won't read it.
-            DecisionMessage(id: envelope.id, permission: .deny, reason: "should not be emitted")
+            AgentDecision(id: envelope.id, verdict: .deny, reason: "should not be emitted")
         }
         try server.start()
         defer { server.stop() }
@@ -338,8 +338,8 @@ struct HookHandlerE2ETests {
     func legacyEventFlagOverridesPayload() throws {
         let binary = try requireBinary()
         let socketPath = uniqueSocketPath()
-        let server = UnixSocketServer(socketPath: socketPath) { envelope in
-            DecisionMessage(id: envelope.id, permission: .allow, reason: "via --event")
+        let server = UnixSocketServer(socketPath: socketPath) { envelope, _ in
+            AgentDecision(id: envelope.id, verdict: .allow, reason: "via --event")
         }
         try server.start()
         defer { server.stop() }

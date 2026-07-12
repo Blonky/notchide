@@ -86,16 +86,28 @@ func runHandle(explicitEventName: String?) -> Never {
         ?? eventNameOverride(from: CommandLine.arguments)
     let effectiveEventName = overridden ?? event.hookEventName
 
+    // Translate the Claude hook event into a vendor-neutral AAP AgentEvent. The
+    // (possibly overridden) event name drives the AAP kind. One correlation id is
+    // shared by the DecisionRequest, the envelope, and the eventual decision.
+    let effectiveKind = ClaudeCodeProvider.kind(for: effectiveEventName)
+    let correlationID = UUID()
+    let agentEvent = ClaudeCodeProvider.agentEvent(
+        from: event,
+        kindOverride: effectiveKind,
+        correlationID: correlationID
+    )
+
     // Socket path: an explicit NOTCHIDE_SOCKET_PATH override (used by the e2e
     // test and useful for dev / multiple instances) wins; otherwise the default
-    // ~/Library/Application Support/notchide/hook.sock.
+    // ~/Library/Application Support/notchide/agent.sock.
     let socketPath = ProcessInfo.processInfo.environment["NOTCHIDE_SOCKET_PATH"]
         .flatMap { $0.isEmpty ? nil : $0 } ?? NotchidePaths.socketPath
 
-    // Only PreToolUse is a blocking permission gate; everything else is
+    // Only a permission gate (`.needsDecision`) blocks; everything else is
     // best-effort fire-and-forget.
-    let isBlocking = (effectiveEventName == .preToolUse)
-    let envelope = HookEnvelope(event: event, wantsDecision: isBlocking)
+    let isBlocking = (effectiveKind == .needsDecision)
+    let envelope = AgentEnvelope(id: correlationID, event: agentEvent, wantsDecision: isBlocking)
+    let handshake = ClaudeCodeProvider.handshake
 
     if isBlocking {
         // A permission prompt legitimately waits for a human. Default 10 minutes;
@@ -110,6 +122,7 @@ func runHandle(explicitEventName: String?) -> Never {
         // (timeout / malformed / app declined to decide) → fail open.
         let decision = (try? UnixSocketClient.send(
             envelope,
+            handshake: handshake,
             to: socketPath,
             awaitDecision: true,
             timeout: timeout
@@ -122,7 +135,7 @@ func runHandle(explicitEventName: String?) -> Never {
         // Map the app's decision onto the Claude Code PreToolUse decision output.
         // (`redirect` is reserved for app-side handling and is not part of the
         // Claude Code decision schema, so it is not emitted here.)
-        let hookDecision = HookDecision(permission: decision.permission, reason: decision.reason)
+        let hookDecision = HookDecision(permissionDecision: decision.verdict, reason: decision.reason)
         if let json = try? hookDecision.jsonString() {
             writeStdoutLine(json)
         }
@@ -132,6 +145,7 @@ func runHandle(explicitEventName: String?) -> Never {
         // A short connect timeout keeps us from lingering if the app is wedged.
         _ = try? UnixSocketClient.send(
             envelope,
+            handshake: handshake,
             to: socketPath,
             awaitDecision: false,
             timeout: 2.0
@@ -196,12 +210,6 @@ func eventNameOverride(from arguments: [String]) -> HookEventName? {
         return nil
     }
     return HookEventName(rawValue: arguments[index + 1])
-}
-
-extension HookDecision {
-    init(permission: PermissionDecision, reason: String?) {
-        self.init(permissionDecision: permission, reason: reason)
-    }
 }
 
 // MARK: - CLI option parsing
@@ -556,13 +564,14 @@ func printUsage() {
 
 // MARK: - Self test
 
-/// Spawns a server on a temp socket, sends a PreToolUse event through the real
-/// client, and prints OK/FAIL. Useful for verifying the IPC path end to end.
+/// Spawns a server on a temp socket, performs the AAP handshake, sends a blocking
+/// gate event through the real client, and prints OK/FAIL. Useful for verifying
+/// the IPC path end to end.
 func selfTest() {
     let tempSocket = NSTemporaryDirectory() + "notchide-selftest-\(UUID().uuidString.prefix(8)).sock"
 
-    let server = UnixSocketServer(socketPath: tempSocket) { envelope in
-        DecisionMessage(id: envelope.id, permission: .deny, reason: "selftest")
+    let server = UnixSocketServer(socketPath: tempSocket) { envelope, _ in
+        AgentDecision(id: envelope.id, verdict: .deny, reason: "selftest")
     }
 
     do {
@@ -580,16 +589,19 @@ func selfTest() {
         toolName: "Bash",
         toolInput: .object(["command": .string("rm -rf build/")])
     )
-    let envelope = HookEnvelope(event: event, wantsDecision: true)
+    let correlationID = UUID()
+    let agentEvent = ClaudeCodeProvider.agentEvent(from: event, correlationID: correlationID)
+    let envelope = AgentEnvelope(id: correlationID, event: agentEvent, wantsDecision: true)
 
     let decision = (try? UnixSocketClient.send(
         envelope,
+        handshake: ClaudeCodeProvider.handshake,
         to: tempSocket,
         awaitDecision: true,
         timeout: 3.0
     )) ?? nil
 
-    if let decision, decision.permission == .deny {
+    if let decision, decision.verdict == .deny {
         print("SELFTEST OK (received .deny over \(tempSocket))")
     } else {
         FileHandle.standardError.write(Data("SELFTEST FAIL: no valid decision received\n".utf8))

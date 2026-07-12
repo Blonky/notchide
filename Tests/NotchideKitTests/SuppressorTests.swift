@@ -6,16 +6,18 @@ import Foundation
 struct SuppressorTests {
 
     private let suppressor = Suppressor()
+    private let provider = ProviderID("sh.test")
 
-    private func event(_ name: HookEventName?, raw: String = "") -> HookEvent {
-        HookEvent(sessionId: "s1", cwd: "/tmp", hookEventName: name, rawHookEventName: raw)
+    private func key(_ session: String = "s1") -> SessionKey {
+        SessionKey(provider: provider, agentSessionID: session, cwd: "/tmp")
     }
 
     @Test("hard block + hidden + unmuted → tap")
     func hardBlockHiddenUnmuted() async {
         let context = StubFrontmostContext(visibleSessions: [])
         let result = await suppressor.shouldTap(
-            event: event(.preToolUse), key: "s1", muted: false, context: context
+            kind: .needsDecision, decisionCapability: .blocking,
+            key: key(), muted: false, context: context
         )
         #expect(result.tap == true)
         #expect(result.reason == "terminal not visible")
@@ -23,9 +25,10 @@ struct SuppressorTests {
 
     @Test("visible session → no tap")
     func visibleSuppresses() async {
-        let context = StubFrontmostContext(visibleSessions: ["s1"])
+        let context = StubFrontmostContext(visibleSessions: [key()])
         let result = await suppressor.shouldTap(
-            event: event(.notification), key: "s1", muted: false, context: context
+            kind: .notified, decisionCapability: .blocking,
+            key: key(), muted: false, context: context
         )
         #expect(result.tap == false)
         #expect(result.reason == "already visible")
@@ -35,7 +38,8 @@ struct SuppressorTests {
     func mutedSuppresses() async {
         let context = StubFrontmostContext(visibleSessions: [])
         let result = await suppressor.shouldTap(
-            event: event(.stop), key: "s1", muted: true, context: context
+            kind: .finished, decisionCapability: .blocking,
+            key: key(), muted: true, context: context
         )
         #expect(result.tap == false)
         #expect(result.reason == "muted")
@@ -44,32 +48,37 @@ struct SuppressorTests {
     @Test("soft event → no tap")
     func softEventSuppresses() async {
         let context = StubFrontmostContext(visibleSessions: [])
-        // PostToolUse is not a hard block.
+        // progress (e.g. PostToolUse / SubagentStop) is not a hard block.
         let result = await suppressor.shouldTap(
-            event: event(.postToolUse), key: "s1", muted: false, context: context
+            kind: .progress, decisionCapability: .blocking,
+            key: key(), muted: false, context: context
         )
         #expect(result.tap == false)
         #expect(result.reason == "not a blocking event")
     }
 
-    @Test("SubagentStop is not a hard block")
-    func subagentStopIsSoft() async {
-        let context = StubFrontmostContext(visibleSessions: [])
-        let result = await suppressor.shouldTap(
-            event: event(.subagentStop), key: "s1", muted: false, context: context
-        )
-        #expect(result.tap == false)
-        #expect(result.reason == "not a blocking event")
-    }
-
-    @Test("all three hard-block events can tap when hidden + unmuted")
+    @Test("all three hard-block kinds can tap when hidden + unmuted (blocking provider)")
     func allHardBlocksTap() async {
         let context = StubFrontmostContext(visibleSessions: [])
-        for name in [HookEventName.preToolUse, .notification, .stop] {
+        for kind in [AgentEventKind.needsDecision, .notified, .finished] {
             let result = await suppressor.shouldTap(
-                event: event(name), key: "s1", muted: false, context: context
+                kind: kind, decisionCapability: .blocking,
+                key: key(), muted: false, context: context
             )
-            #expect(result.tap == true, "\(name) should tap")
+            #expect(result.tap == true, "\(kind) should tap")
+        }
+    }
+
+    @Test("a notify-only provider can never tap the user")
+    func notifyOnlyNeverTaps() async {
+        let context = StubFrontmostContext(visibleSessions: [])
+        for kind in [AgentEventKind.needsDecision, .notified, .finished] {
+            let result = await suppressor.shouldTap(
+                kind: kind, decisionCapability: .notifyOnly,
+                key: key(), muted: false, context: context
+            )
+            #expect(result.tap == false, "\(kind) must not tap for a notify-only provider")
+            #expect(result.reason == "not a blocking event")
         }
     }
 }

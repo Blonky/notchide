@@ -5,44 +5,50 @@ import Foundation
 @Suite("SessionStore")
 struct SessionStoreTests {
 
-    private func event(_ name: HookEventName, session: String = "s1", cwd: String = "/tmp") -> HookEvent {
-        HookEvent(sessionId: session, cwd: cwd, hookEventName: name)
+    private let provider = ProviderID("sh.test")
+
+    private func key(_ session: String, cwd: String = "/tmp") -> SessionKey {
+        SessionKey(provider: provider, agentSessionID: session, cwd: cwd)
     }
 
-    @Test("ingest maps each event type to the correct lane state")
+    private func event(
+        _ kind: AgentEventKind,
+        session: String = "s1",
+        cwd: String = "/tmp",
+        command: String? = nil
+    ) -> AgentEvent {
+        AgentEvent(
+            providerID: provider,
+            sessionKey: key(session, cwd: cwd),
+            kind: kind,
+            command: command
+        )
+    }
+
+    @Test("ingest maps each event kind to the correct lane state")
     func stateTransitions() async {
         let store = SessionStore()
 
-        #expect(await store.ingest(event(.preToolUse)) == .needsYou)
-        #expect(await store.ingest(event(.notification)) == .needsYou)
-        #expect(await store.ingest(event(.postToolUse)) == .flowing)
-        #expect(await store.ingest(event(.userPromptSubmit)) == .flowing)
-        #expect(await store.ingest(event(.sessionStart)) == .flowing)
-        #expect(await store.ingest(event(.stop)) == .done)
-        #expect(await store.ingest(event(.subagentStop)) == .done)
+        #expect(await store.ingest(event(.needsDecision)) == .needsYou)
+        #expect(await store.ingest(event(.notified)) == .needsYou)
+        #expect(await store.ingest(event(.progress)) == .flowing)
+        #expect(await store.ingest(event(.started)) == .flowing)
+        #expect(await store.ingest(event(.finished)) == .done)
     }
 
-    @Test("unclassifiable events yield the error state")
-    func unknownEventIsError() async {
+    @Test("errored events yield the error state")
+    func erroredEventIsError() async {
         let store = SessionStore()
-        let unknown = HookEvent(sessionId: "s1", cwd: "/tmp", hookEventName: nil, rawHookEventName: "Mystery")
-        #expect(await store.ingest(unknown) == .error)
+        #expect(await store.ingest(event(.errored)) == .error)
     }
 
-    @Test("ingest records the last command for tool events")
+    @Test("ingest records the last command and kind for tool events")
     func recordsLastCommand() async {
         let store = SessionStore()
-        let e = HookEvent(
-            sessionId: "s1",
-            cwd: "/tmp",
-            hookEventName: .preToolUse,
-            toolName: "Bash",
-            toolInput: .object(["command": .string("make test")])
-        )
-        _ = await store.ingest(e)
+        _ = await store.ingest(event(.needsDecision, command: "make test"))
         let lane = await store.mostUrgent()
         #expect(lane?.lastCommand == "make test")
-        #expect(lane?.lastEvent == "PreToolUse")
+        #expect(lane?.lastEvent == "needsDecision")
     }
 
     @Test("mostUrgent prefers needsYou over flowing across sessions")
@@ -50,12 +56,12 @@ struct SessionStoreTests {
         let clock = MutableClock(Date(timeIntervalSince1970: 1_000))
         let store = SessionStore(now: clock.now)
 
-        _ = await store.ingest(event(.preToolUse, session: "needs"))      // needsYou
+        _ = await store.ingest(event(.needsDecision, session: "needs"))   // needsYou
         clock.advance(1)
-        _ = await store.ingest(event(.postToolUse, session: "flowing"))   // flowing, but newer
+        _ = await store.ingest(event(.progress, session: "flowing"))      // flowing, newer
 
         let urgent = await store.mostUrgent()
-        #expect(urgent?.id == "needs")
+        #expect(urgent?.id.agentSessionID == "needs")
         #expect(urgent?.state == .needsYou)
     }
 
@@ -63,6 +69,24 @@ struct SessionStoreTests {
     func mostUrgentEmpty() async {
         let store = SessionStore()
         #expect(await store.mostUrgent() == nil)
+    }
+
+    @Test("a blocking provider's needsDecision lane exposes decision buttons")
+    func pendingDecisionSurfacesButtons() async {
+        let store = SessionStore()
+        await store.register(provider, decisionCapability: .blocking)
+        let e = AgentEvent(
+            providerID: provider,
+            sessionKey: key("s1"),
+            kind: .needsDecision,
+            command: "rm -rf build/",
+            decision: DecisionRequest(prompt: "rm -rf build/")
+        )
+        _ = await store.ingest(e)
+        let lane = await store.mostUrgent()
+        #expect(lane?.state == .needsYou)
+        #expect(lane?.showsDecisionButtons == true)
+        #expect(lane?.pendingDecision?.prompt == "rm -rf build/")
     }
 
     @Test("snapshots stream yields updates on ingest")
@@ -74,7 +98,7 @@ struct SessionStoreTests {
         let initial = await iterator.next()
         #expect(initial?.isEmpty == true)
 
-        _ = await store.ingest(event(.preToolUse, session: "s1"))
+        _ = await store.ingest(event(.needsDecision, session: "s1"))
         let next = await iterator.next()
         #expect(next?.count == 1)
         #expect(next?.first?.state == .needsYou)

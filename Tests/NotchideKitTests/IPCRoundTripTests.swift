@@ -13,37 +13,44 @@ private func semaphoreWait(_ semaphore: DispatchSemaphore) {
 @Suite("IPC round-trip", .serialized)
 struct IPCRoundTripTests {
 
+    private let provider = ProviderID("sh.claude")
+
+    private var handshake: AAPHandshake {
+        AAPHandshake(providerID: provider, capabilities: [.observe, .gate])
+    }
+
     private func tempSocketPath() -> String {
         NSTemporaryDirectory() + "nh-\(UUID().uuidString.prefix(8)).sock"
     }
 
-    private func preToolUseEnvelope(wantsDecision: Bool) -> HookEnvelope {
-        let event = HookEvent(
-            sessionId: "sess",
-            cwd: "/tmp",
-            hookEventName: .preToolUse,
-            toolName: "Bash",
-            toolInput: .object(["command": .string("rm -rf build/")])
+    private func gateEnvelope(wantsDecision: Bool, command: String = "rm -rf build/") -> AgentEnvelope {
+        let id = UUID()
+        let event = AgentEvent(
+            providerID: provider,
+            sessionKey: SessionKey(provider: provider, agentSessionID: "sess", cwd: "/tmp"),
+            kind: .needsDecision,
+            command: command,
+            decision: DecisionRequest(id: id, prompt: command)
         )
-        return HookEnvelope(event: event, wantsDecision: wantsDecision)
+        return AgentEnvelope(id: id, event: event, wantsDecision: wantsDecision)
     }
 
     @Test("client receives the decision returned by the server handler")
     func endToEndDeny() throws {
         let path = tempSocketPath()
-        let server = UnixSocketServer(socketPath: path) { envelope in
-            DecisionMessage(id: envelope.id, permission: .deny, reason: "blocked in test")
+        let server = UnixSocketServer(socketPath: path) { envelope, _ in
+            AgentDecision(id: envelope.id, verdict: .deny, reason: "blocked in test")
         }
         try server.start()
         defer { server.stop() }
 
-        let envelope = preToolUseEnvelope(wantsDecision: true)
+        let envelope = gateEnvelope(wantsDecision: true)
         let decision = try UnixSocketClient.send(
-            envelope, to: path, awaitDecision: true, timeout: 5.0
+            envelope, handshake: handshake, to: path, awaitDecision: true, timeout: 5.0
         )
 
         let received = try #require(decision)
-        #expect(received.permission == .deny)
+        #expect(received.verdict == .deny)
         #expect(received.reason == "blocked in test")
         #expect(received.id == envelope.id)
     }
@@ -52,14 +59,14 @@ struct IPCRoundTripTests {
     func clientTimeout() throws {
         let path = tempSocketPath()
         // Handler returns nil → server writes nothing → client must time out.
-        let server = UnixSocketServer(socketPath: path) { _ in nil }
+        let server = UnixSocketServer(socketPath: path) { _, _ in nil }
         try server.start()
         defer { server.stop() }
 
         let start = Date()
-        let envelope = preToolUseEnvelope(wantsDecision: true)
         let decision = try UnixSocketClient.send(
-            envelope, to: path, awaitDecision: true, timeout: 0.5
+            gateEnvelope(wantsDecision: true), handshake: handshake,
+            to: path, awaitDecision: true, timeout: 0.5
         )
         let elapsed = Date().timeIntervalSince(start)
 
@@ -71,10 +78,10 @@ struct IPCRoundTripTests {
     @Test("fire-and-forget delivers the envelope without awaiting a decision")
     func fireAndForget() throws {
         let path = tempSocketPath()
-        let box = UncheckedBox<HookEnvelope?>(nil)
+        let box = UncheckedBox<AgentEnvelope?>(nil)
         let semaphore = DispatchSemaphore(value: 0)
 
-        let server = UnixSocketServer(socketPath: path) { envelope in
+        let server = UnixSocketServer(socketPath: path) { envelope, _ in
             box.value = envelope
             semaphore.signal()
             return nil
@@ -82,25 +89,32 @@ struct IPCRoundTripTests {
         try server.start()
         defer { server.stop() }
 
-        let event = HookEvent(sessionId: "s", cwd: "/tmp", hookEventName: .notification, message: "hi")
-        let envelope = HookEnvelope(event: event, wantsDecision: false)
+        let event = AgentEvent(
+            providerID: provider,
+            sessionKey: SessionKey(provider: provider, agentSessionID: "s", cwd: "/tmp"),
+            kind: .notified,
+            title: "hi"
+        )
+        let envelope = AgentEnvelope(event: event, wantsDecision: false)
         let result = try UnixSocketClient.send(
-            envelope, to: path, awaitDecision: false, timeout: 2.0
+            envelope, handshake: handshake, to: path, awaitDecision: false, timeout: 2.0
         )
         #expect(result == nil)
 
         // The server should still have received and handled the envelope.
         let delivered = semaphore.wait(timeout: .now() + 3.0)
         #expect(delivered == .success)
-        #expect(box.value?.event.message == "hi")
+        #expect(box.value?.event.title == "hi")
     }
 
-    @Test("connect to a missing socket throws (CLI treats this as fail-open)")
+    @Test("connect to a missing socket throws (the adapter treats this as fail-open)")
     func connectFailure() {
         let path = tempSocketPath() // nothing listening
-        let envelope = preToolUseEnvelope(wantsDecision: true)
         #expect(throws: (any Error).self) {
-            _ = try UnixSocketClient.send(envelope, to: path, awaitDecision: true, timeout: 0.5)
+            _ = try UnixSocketClient.send(
+                gateEnvelope(wantsDecision: true), handshake: handshake,
+                to: path, awaitDecision: true, timeout: 0.5
+            )
         }
     }
 
@@ -110,26 +124,25 @@ struct IPCRoundTripTests {
         let release = DispatchSemaphore(value: 0)      // gates the slow handler
         let slowInFlight = DispatchSemaphore(value: 0)  // slow handler has begun
 
-        let server = UnixSocketServer(socketPath: path) { envelope in
-            if envelope.event.toolName == "SlowTool" {
+        let server = UnixSocketServer(socketPath: path) { envelope, _ in
+            if envelope.event.command == "SlowTool" {
                 slowInFlight.signal()
                 semaphoreWait(release) // block this connection until the test releases it
-                return DecisionMessage(id: envelope.id, permission: .deny, reason: "slow")
+                return AgentDecision(id: envelope.id, verdict: .deny, reason: "slow")
             }
-            return DecisionMessage(id: envelope.id, permission: .allow, reason: "fast")
+            return AgentDecision(id: envelope.id, verdict: .allow, reason: "fast")
         }
         try server.start()
         defer { server.stop() }
 
         // Fire the slow request on a background thread; it will block in-handler.
-        let slowResult = UncheckedBox<DecisionMessage?>(nil)
+        let slowResult = UncheckedBox<AgentDecision?>(nil)
         let slowDone = DispatchSemaphore(value: 0)
+        let handshakeValue = handshake
         Thread.detachNewThread {
-            let event = HookEvent(sessionId: "s", cwd: "/", hookEventName: .preToolUse,
-                                  toolName: "SlowTool", toolInput: .object([:]))
             slowResult.value = try? UnixSocketClient.send(
-                HookEnvelope(event: event, wantsDecision: true),
-                to: path, awaitDecision: true, timeout: 5.0)
+                self.gateEnvelope(wantsDecision: true, command: "SlowTool"),
+                handshake: handshakeValue, to: path, awaitDecision: true, timeout: 5.0)
             slowDone.signal()
         }
 
@@ -137,20 +150,18 @@ struct IPCRoundTripTests {
         #expect(slowInFlight.wait(timeout: .now() + 3.0) == .success)
 
         // A second connection must be served promptly despite the first being stuck.
-        let fastEvent = HookEvent(sessionId: "s", cwd: "/", hookEventName: .preToolUse,
-                                  toolName: "FastTool", toolInput: .object([:]))
         let start = Date()
         let fast = try UnixSocketClient.send(
-            HookEnvelope(event: fastEvent, wantsDecision: true),
-            to: path, awaitDecision: true, timeout: 3.0)
+            gateEnvelope(wantsDecision: true, command: "FastTool"),
+            handshake: handshakeValue, to: path, awaitDecision: true, timeout: 3.0)
         let elapsed = Date().timeIntervalSince(start)
 
-        #expect(fast?.permission == .allow)
+        #expect(fast?.verdict == .allow)
         #expect(elapsed < 2.0, "second connection stalled behind the blocked one")
 
         // Release the slow handler; it should now complete with its own decision.
         release.signal()
         #expect(slowDone.wait(timeout: .now() + 3.0) == .success)
-        #expect(slowResult.value?.permission == .deny)
+        #expect(slowResult.value?.verdict == .deny)
     }
 }
