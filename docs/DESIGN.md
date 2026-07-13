@@ -78,7 +78,10 @@ Two questions that pin down the design:
   surface that floats above every fullscreen app across every Space. A menu-bar item is hidden
   behind a fullscreen app; an OS notification is transient and can't host a git diff and
   decision buttons; a HUD window steals focus. The notch is uniquely both **always-on-top**
-  and **non-focus-stealing**.
+  and **non-focus-stealing** — and both properties come from **public AppKit** (a
+  non-activating `NSPanel` at the screen-saver window level with a full-screen-auxiliary
+  collection behavior), **not** from a private framework. The recipe is in §10.1 and
+  [ARCHITECTURE §3.6](ARCHITECTURE.md#36-gui-types-in-app).
 - **"Why not just a window?"** A window steals keyboard focus the moment it appears. That is
   the exact anti-pattern the product exists to avoid — the whole value is deciding *without*
   leaving your current app.
@@ -93,14 +96,25 @@ Explicit non-goals keep the scope honest. notchide is deliberately **not**:
   agent already produced; it does not let you edit code. This is the load-bearing constraint —
   see §11 on scope gravity. (Inline editing is reconsidered no earlier than v0.3, and only if a
   stable editor component exists.)
-- **A Mac App Store app.** notchide needs private frameworks the App Store forbids (see §10).
-  It ships as a notarized direct-download `.dmg`.
+- **A Mac App Store app.** notchide must be **non-sandboxed** — for the push-to-talk
+  `CGEventTap`, the shared `agent.sock` path the hook process must reach, and private SkyLight
+  suppression — which the App Store forbids (see §10.2). It ships as a notarized direct-download
+  `.dmg`. (The overlay itself is public API, §10.1 — it is not what bars the App Store.)
 - **A Quake-style terminal / a terminal emulator.** notchide is not where you type at your
   agent. It provides a **jump-to-terminal** escape hatch and (v0.2, behind a flag) an optional
   read-only terminal *peek*, but the terminal remains the terminal.
 - **A general notification center.** notchide surfaces exactly one class of event — an agent
   blocked on a permission it can't resolve alone. It is not a home for arbitrary alerts.
 - **A polling monitor.** notchide is event-driven end to end; if it ever polls, that's a bug.
+- **A surface above the lock screen.** notchide deliberately renders **nothing** over
+  `loginwindow`. It is infeasible for a notarized app (the lock screen is a separate secure
+  session) and, more to the point, a **security anti-goal**: approving an agent's `rm -rf` on an
+  unattended, *locked* Mac is exactly what must never be possible. When the screen locks,
+  notchide surfaces nothing and decides nothing (§10.2).
+- **Hidden from screen capture.** notchide makes **no** promise to hide its surface from screen
+  recording — `NSWindow.sharingType = .none` is ignored by ScreenCaptureKit on macOS 15+, so
+  the guarantee would be false. It instead never renders a secret in the notch and relies on the
+  OS's mandatory recording indicator (§10.4).
 
 ---
 
@@ -155,7 +169,7 @@ each provider's advertised **capabilities** (see [PROTOCOL.md §2](PROTOCOL.md#2
   decision buttons**. This is a type-level guarantee, not a UI preference — a notify-only provider
   is structurally unable to seize the user (`SessionStore` clamps its state; `Suppressor` never
   taps for it; `Lane.showsDecisionButtons` requires a blocking provider). The v0.2 OTLP listener
-  is exactly such a provider: it proves the abstraction by observing without ever gating.
+  (§13) is exactly such a provider: it proves the abstraction by observing without ever gating.
 
 ---
 
@@ -235,7 +249,7 @@ The decision maps directly onto Claude Code's `PreToolUse` output schema:
 - **Redirect** → `deny` + the one-line redirect surfaced back to the agent as the reason /
   additional context, so the agent gets a concrete steer instead of a bare refusal.
 - **Approve-and-remember** → `allow` now, and the exact command string is cached so future
-  identical calls auto-resolve (see §13).
+  identical calls auto-resolve (see §15).
 
 ```jsonc
 // notchide-hook stdout on Approve — Claude Code proceeds:
@@ -286,8 +300,9 @@ its job.
 > **v0.1 scope — coarse suppression.** The shipped check is deliberately coarse: it treats a
 > session as "visible" when **any known terminal emulator is the frontmost application**, not
 > per-window or per-Space. It does not yet match the *specific* session's window (by title /
-> cwd) or confirm it is on the active Space — that needs the Accessibility API and
-> SkyLight/`CGSSpace` and is a later milestone (§10). Consequently, if you have any terminal
+> cwd) or confirm it is on the active Space — that needs the Accessibility API and private
+> SkyLight (`CGSGetActiveSpace` / `CGSCopyManagedDisplaySpaces`) and is a later milestone
+> (§10.2). Consequently, if you have any terminal
 > frontmost, notchide stays silent even about a *different* hidden session; the precise
 > per-window/per-Space policy above is the v1.0 target.
 
@@ -340,7 +355,7 @@ These are first-class product commitments, tested and defended, not nice-to-have
 - **Per-session + global mute** — plus a one-line "why did this tap?" on every escalation.
 - **Conservative write path** — the full command is always shown, an explicit click is always
   required, ambiguity **defaults to Deny**, and notchide **never auto-approves** (except the
-  explicit, per-exact-command Approve-and-remember, §13).
+  explicit, per-exact-command Approve-and-remember, §15).
 - **Fail-open hook** — an unavailable notchide never bricks an agent (§6.2).
 - **First-class floating-pill fallback** — non-notch Macs and external displays are not
   second-class.
@@ -348,25 +363,94 @@ These are first-class product commitments, tested and defended, not nice-to-have
 
 ---
 
-## 10. Distribution & the notarization / private-framework plan
+## 10. Distribution, packaging & the security model
 
 notchide ships as a **notarized, direct-download `.dmg`** — deliberately **not** via the Mac
 App Store.
 
-**Why not the App Store:** drawing above fullscreen apps and the lock screen, and hiding
-notchide from screen capture, requires **private frameworks** (SkyLight / `CGSSpace`). The App
-Store sandbox forbids them. The value proposition — a surface above *everything* — is
-incompatible with the App Store, so we don't pretend otherwise.
+### 10.1 The overlay is public API
+
+Rendering the notch panel — the pill and the console — **above another app's native
+full-screen space**, across every Space, without stealing focus, is **public AppKit**, not a
+private framework. The recipe is a single non-activating `NSPanel`:
+
+- `styleMask` = `[.borderless, .nonactivatingPanel]`;
+- `collectionBehavior` = `[.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]` — the
+  `.fullScreenAuxiliary` flag is precisely what lets the panel sit over another app's
+  full-screen;
+- `level` = `.screenSaver` (above ordinary and full-screen windows);
+- shown with `orderFrontRegardless()`, and `becomesKeyOnlyIfNeeded = true` so a peek never
+  activates notchide.
+
+The ambient pill is **click-through and never key** (`ignoresMouseEvents = true`; it never
+becomes key); only the expanded console takes clicks, and even then focus is preserved (§9).
+The one place notchide must **correct** its `NSPanel` substrate — DynamicNotchKit omits
+`.fullScreenAuxiliary` (notchide adds it) and hardcodes `canBecomeKey = true` (notchide gates it
+per state so the pill is click-through and never key, toggling `ignoresMouseEvents`) — is
+detailed in [ARCHITECTURE §3.6](ARCHITECTURE.md#36-gui-types-in-app).
+
+### 10.2 Why not the App Store — non-sandbox, not private frameworks
+
+The blocker is the **sandbox**, which is App-Store-only. notchide ships **non-sandboxed**
+because it needs, all of which the sandbox forbids:
+
+- a **`CGEventTap`** for press-and-hold push-to-talk (§12.7);
+- the real `~/Library/Application Support/notchide/agent.sock` path, which a **separate** hook
+  process (a child of Claude Code, **not** of notchide — see
+  [SUPERVISION.md §1](SUPERVISION.md#1-the-ownership-tree)) must be able to reach;
+- private **SkyLight** (`CGSGetActiveSpace` / `CGSCopyManagedDisplaySpaces`) — used **only** to
+  sharpen *per-Space suppression* (§7), never to draw. It is feature-detected and degrades to
+  the coarse `NSWorkspace.frontmostApplication` check when a symbol is unavailable.
+
+So the incompatibility is the sandbox, not the overlay: the surface-above-everything is public
+API (§10.1); the sandbox-forbidden pieces are the event tap, the shared socket path the hook
+must reach, and the optional SkyLight suppression refinement. The lock screen is out of scope by
+construction (§3): `loginwindow` is a separate secure session a notarized app cannot draw over,
+and doing so would be a security anti-goal.
+
+### 10.3 Packaging & code-signing (Hardened Runtime, Developer ID, notarize + staple)
+
+notchide is distributed **non-sandboxed + Hardened Runtime + Developer ID + notarized +
+stapled**. Concretely:
+
+- The app is signed with a **Developer ID Application** certificate and the **Hardened
+  Runtime** enabled, then **notarized and stapled** so it launches without a Gatekeeper prompt.
+- The **embedded Node sidecar** (the `sh.claude.host` host, §12.3) is a *distinct* executable
+  that needs its **own** Developer ID signature plus the entitlements
+  `com.apple.security.cs.allow-jit` and
+  `com.apple.security.cs.allow-unsigned-executable-memory` — without them, V8's JIT crashes
+  under the Hardened Runtime.
+- **TCC grants are keyed to code identity.** Rotating or re-signing with a *different*
+  certificate **resets every grant** (Accessibility, Input Monitoring, Screen Recording,
+  Microphone), so **certificate continuity** is a release requirement, planned from t=0 — not
+  discovered on a rotation.
+- **Screen Recording** (needed only for the capture-backed paths) requires an app **relaunch
+  after the grant** — the process must restart before the new grant takes effect.
 
 **The plan, de-risked first:** the **first engineering milestone** is a **notarization smoke
-test** — prove that a `.dmg` that *links a private framework* actually passes Apple
-notarization, before any product code is built on that assumption. Notarization (unlike App
-Store review) is an automated malware/hardened-runtime check, not an API-usage audit, so this is
-expected to pass — but it is a hard dependency and gets proven at t=0, not discovered at ship.
+test** — prove that a non-sandboxed, Hardened-Runtime `.dmg` (with the JIT-entitled Node sidecar
+and a weak-linked SkyLight symbol) actually passes Apple notarization, before any product code
+is built on that assumption. Notarization (unlike App Store review) is an automated
+malware/hardened-runtime check, not an API-usage audit, so this is expected to pass — but it is
+a hard dependency and gets proven at t=0, not discovered at ship.
 
-Private-framework use is paired with **feature-detection and graceful degradation** (§11): if a
-symbol or Space API is missing on a given macOS point release, notchide degrades (e.g. to the
-floating pill / a normal always-on-top panel) rather than crashing.
+Private-symbol use (SkyLight) is paired with **feature-detection and graceful degradation**
+(§11): if a Space symbol is missing on a given macOS point release, notchide degrades to the
+coarse frontmost-app suppression check (§7) rather than crashing. **The overlay itself never
+degrades** — it is public API on every supported release.
+
+### 10.4 Screen capture — no hiding guarantee
+
+notchide does **not** promise to hide its surface from screen recording. `NSWindow.sharingType
+= .none` is **ignored by ScreenCaptureKit on macOS 15+**, so a "the notch is invisible to
+capture" guarantee would be false. Instead:
+
+- notchide **never renders a secret** in the notch surface — no tokens, no key material, no full
+  credential strings; the write path shows commands and diffs, not secrets; and
+- it relies on the OS's **mandatory recording indicator** (the menu-bar capture dot) to tell the
+  user when a capture is live.
+
+Hiding-from-capture is therefore an explicit **non-goal** (§3), not a broken promise.
 
 ---
 
@@ -376,8 +460,8 @@ floating pill / a normal always-on-top panel) rather than crashing.
 | ------------------------------------------------------------------------------------ | ---------- |
 | **Annoyance is the product-killer.** An over-eager notch trains users to ignore or uninstall it. | Smart suppression is the core bet (§7): silence by default, never tap about a visible session, mute, and a legible "why did this tap?". If notchide is annoying, it has failed regardless of features. |
 | **Synchronous-hook coupling.** Blocking `PreToolUse` on notchide could hang the agent. | **Fail-open** (§6.2): hard timeout, exit `0`, defer to Claude Code's normal prompt. notchide is never load-bearing. |
-| **Security-sensitive write path.** Approving a command the user didn't fully read is dangerous. | Conservative write path (§9): full command always shown, explicit click required, **default-to-Deny** on ambiguity, **never auto-approve** except explicit per-exact-command remembering (§13). |
-| **Private-framework fragility.** SkyLight / `CGSSpace` are undocumented and can change across macOS releases. | Feature-detect at runtime and **degrade** (floating pill / plain always-on-top) rather than crash; prove notarization at t=0 (§10); harden feature-detection across point releases by v1.0. |
+| **Security-sensitive write path.** Approving a command the user didn't fully read is dangerous. | Conservative write path (§9): full command always shown, explicit click required, **default-to-Deny** on ambiguity, **never auto-approve** except explicit per-exact-command remembering (§15). |
+| **Private-symbol fragility.** SkyLight (`CGSGetActiveSpace` / `CGSCopyManagedDisplaySpaces`) is undocumented and can change across macOS releases. | It is used **only** to sharpen per-Space suppression (§7, §10.2), **never to draw** — the overlay is public API (§10.1). Feature-detect at runtime and **degrade to the coarse frontmost-app check** rather than crash; prove notarization at t=0 (§10.3); harden feature-detection across point releases by v1.0. |
 | **Single-vendor coupling.** v0.1 *ships* Claude-Code-only. | The core is already agent-agnostic: it is built around **AAP** ([PROTOCOL.md](PROTOCOL.md)) and a generic `AgentEvent`/`AgentProvider` model, with Claude Code as the reference adapter. v0.2 adds a passive OTLP listener (a second built-in provider, notify-only) proving the abstraction; v1.0 freezes `aap/1` and publishes the adapter SDK + community adapters. |
 | **Scope gravity toward an editor.** "Just let me edit the diff" is a constant pull. | The **NOTIFY + DECIDE, never CREATE** rule is a hard product boundary (§3). Read-only is the whole point: it keeps notchide small, safe, and shippable. Editing is reconsidered no earlier than v0.3 and only against a genuinely stable editor component. |
 | **Notch-only exclusion.** Many Macs (and all external displays) have no notch. | The **floating-pill fallback is first-class** (§4, §9), shipped in v0.1, not bolted on later. |
@@ -488,9 +572,122 @@ gate, which escalates to `needs-you` and requires the deliberate, conservative *
 conservative write path as DECIDE (§9): easy to *start* an agent by voice, impossible to
 *approve danger* by voice.
 
+### 12.7 Hotkeys & the permissions they need
+
+Two affordances, two very different permission costs — and notchide keeps them apart on purpose:
+
+- **Summon is permission-free.** The global summon hotkey (§4.2, §12.4) is registered with
+  **Carbon `RegisterEventHotKey`**, which needs **no** TCC grant. Summoning a session — with or
+  without voice — never prompts for anything.
+- **Push-to-talk defaults to `Control+Option`.** The press-and-**hold** PTT chord is
+  **`Control+Option`**, deliberately **not** double-tap-Fn — double-tap-Fn *is* the macOS
+  Dictation trigger and would collide with the OS. Observing a *held* modifier chord, and (when
+  needed) **swallowing** it so it doesn't leak to the focused app, requires a **`CGEventTap`**: a
+  passive `.listenOnly` tap can watch but **cannot suppress** the event; swallowing needs
+  **Accessibility** plus a `.defaultTap`. **Input Monitoring** is required to read the key stream
+  at all.
+
+**Granted at onboarding, not just-in-time.** Accessibility and Input Monitoring are requested
+**once, at voice-enable onboarding** — never lazily on the first PTT press, because a held-key
+gesture cannot wait on a permission dialog. Neither permission exposes an `NSUsageDescription`
+Info.plist key, so notchide shows its **own custom pre-prompt** explaining why, then deep-links
+straight to the correct System Settings pane with an `x-apple.systempreferences` URL. If the
+user declines, **summon-only** operation still works (summon needs no grant); PTT stays disabled
+until the grants are given.
+
 ---
 
-## 13. Open decisions & locked defaults
+## 13. The OTLP enrichment plane (observe-only)
+
+A second, **zero-config** way in — beside the AAP socket — arrives in v0.2: an **OpenTelemetry
+(OTLP) receiver on `:4318`**. Coding agents already emit OTLP when
+`OTEL_EXPORTER_OTLP_ENDPOINT` points at it, so this lane costs the user nothing to wire up. It is
+strictly an **observe-only enrichment** plane, and understanding *why it can only enrich* is the
+point.
+
+### 13.1 Enrich a lane, never own it
+
+OTLP does not open lanes and does not reliably close them. Claude Code emits **no**
+session-start/session-end over OTLP, so an OTLP stream cannot be trusted to bound a session's
+lifecycle. Instead, OTLP records are **merged onto the lane the hook/sidecar already owns**, by
+**shared session id**: Claude's OTLP `session.id` equals the `PreToolUse` hook's `session_id`;
+Codex's `conversation.id` plays the same role. The merged data is pure enrichment — **tokens,
+cost, model** — layered onto a lane whose *lifecycle and gates* come from the blocking
+hook/sidecar. Hard rule: **an OTLP "done" must never close a lane the hook still shows
+blocking.** Lifecycle belongs to `gate`/`observe` adapters on the AAP socket; OTLP only colors
+them in.
+
+### 13.2 Not a gate, and it cannot carry one
+
+OTLP is a one-way, agent-as-client push. Two consequences:
+
+- Its `*.tool_decision` records are **post-hoc** — they report a decision *already made*, they
+  are **not** a gate notchide can block on.
+- The PROOF path — a real `gate`/`actuate` — **cannot ride OTLP** at all: gating is
+  request/response with the *agent* as client, and there is **no server→client frame** in OTLP to
+  carry a verdict back or push a prompt. Gates stay on the duplex AAP socket
+  ([PROTOCOL.md §6–§7](PROTOCOL.md#6-the-decision-frame)); OTLP stays observe-only.
+
+This makes the OTLP listener the textbook **notify-only provider** of §4.3 — it proves the
+capability model by observing without ever gating. Transport, security, and the "binds nothing
+routable" exception it forces are normative in
+[PROTOCOL.md §3.3](PROTOCOL.md#33-the-otlp-enrichment-transport-loopback-exception). Prior art:
+the shipped competitor **agentnotch** ([github.com/AppGram/agentnotch](https://github.com/AppGram/agentnotch))
+also listens on `:4318` — observe-only, exactly this lane.
+
+---
+
+## 14. The Build stage
+
+Beyond NOTIFY / DECIDE / STEER, the console can show **what the agent built** — a **Build
+stage** that renders the current turn's tangible output inline, still read-only. Because a
+build artifact only exists where notchide can *see* the agent's output stream, the Build stage
+is **HOST-mode only** (§12.3): the `{observe, gate}` `PreToolUse` hook has no output stream to
+classify, so it never produces one; only a streaming HOST adapter does.
+
+### 14.1 The artifact ladder
+
+A HOST adapter classifies the turn's output into a **`BuildArtifact`** — a type that **already
+exists in `NotchideKit`** — with a fallback ladder from richest to plainest:
+
+```
+livePreview(url) → diff → tests → logs → document → screens → error
+```
+
+The provider picks the richest form it can prove, and the console degrades down the ladder when
+it can't. The artifact travels the wire as an **additive** `AgentEvent.artifact` field
+([PROTOCOL.md §5.1](PROTOCOL.md#51-the-agentevent-object),
+[§8](PROTOCOL.md#8-versioning-negotiation--forward-compatibility)) — invisible to any adapter
+that never sets it.
+
+### 14.2 `livePreview` renders untrusted content — egress-locked by construction
+
+A `livePreview(url)` points a **`WKWebView`** at a dev server the agent just started, i.e. at
+**untrusted, agent-authored content**. It is therefore **egress-locked by construction**, not by
+policy:
+
+- a **`WKContentRuleList`** blocks **all** network except `http://127.0.0.1:PORT`;
+- navigation is **pinned to that single loopback origin** via `decidePolicyFor` (any other
+  navigation is refused);
+- **no page-reachable `WKScriptMessageHandler`** is installed — the page cannot call back into
+  the app;
+- a **`.nonPersistent()`** data store (nothing survives the preview) with
+  **`NSAllowsLocalNetworking = YES`** for the loopback origin only.
+
+**Dev-server URL discovery** is never a blind port scan. It is, in order: **scrape the child's
+stdout `Local:` line** (primary); **`libproc` listening-socket enumeration of the agent
+process *subtree*** (fallback); and a **`GET /` readiness probe** before the `WKWebView` loads.
+
+### 14.3 Diffs at a gate are synthetic; real git diff is post-turn
+
+At a **`PreToolUse` gate** the change **has not happened yet** — so the console shows the pending
+`tool_input` as a **synthetic diff** (what the tool *would* do). A **real `git diff`** is
+reserved for the **post-turn** `Stop`/review console, where the change is on disk and can be
+diffed for real. The two are never conflated: gate-time shows intent, post-turn shows fact.
+
+---
+
+## 15. Open decisions & locked defaults
 
 Decisions that are **locked** for v0.1 (revisit only with cause):
 

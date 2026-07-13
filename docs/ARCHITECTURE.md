@@ -2,7 +2,8 @@
 
 The engineering view: package layout, the two platform planes, key types, the concurrency
 model, and how to build and run. The **normative wire protocol** is
-[PROTOCOL.md](PROTOCOL.md); the product *why* is [DESIGN.md](DESIGN.md).
+[PROTOCOL.md](PROTOCOL.md); the **normative process lifecycle** (ownership tree, supervision,
+teardown rails) is [SUPERVISION.md](SUPERVISION.md); the product *why* is [DESIGN.md](DESIGN.md).
 
 ---
 
@@ -33,9 +34,10 @@ notchide/
   builds and tests with nothing but the Swift toolchain, so CI runs fully offline on
   `macos-latest` and contributors can iterate on the hard parts without a network.
 - **`app/` package — the GUI.** Depends on **DynamicNotchKit** (fetched over the network) and on
-  **`NotchideKit` via a local path** (`../`). It draws to the notch and links private frameworks,
-  so it is built on the developer's Mac with Xcode (via XcodeGen) and is **not** part of the
-  offline CI job.
+  **`NotchideKit` via a local path** (`../`). It draws to the notch with **public AppKit** (the
+  `NSPanel` overlay of §3.6 — no private framework is needed to draw), and it weak-links private
+  **SkyLight** symbols used *only* for per-Space suppression (§3.6, §3.4), so it is built on the
+  developer's Mac with Xcode (via XcodeGen) and is **not** part of the offline CI job.
 
 Planned diff-highlighting dependencies (**Neon**, **SwiftTreeSitter**, **CodeEditLanguages**)
 live in the `app/` package too — never in the core.
@@ -164,6 +166,33 @@ All of these live in `NotchideKit` unless noted. Types are small and single-purp
   and the ESC / pin / auto-collapse / summon-hotkey timers. Bridges the observed `SessionStore`
   to DynamicNotchKit's panel.
 
+  **The overlay is public AppKit, not a private framework.** Rendering the pill/console **above
+  another app's native full-screen**, across every Space, without stealing focus, is achieved
+  with a single non-activating `NSPanel`:
+
+  - `styleMask` = `[.borderless, .nonactivatingPanel]`;
+  - `collectionBehavior` = `[.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]`;
+  - `level` = `.screenSaver`; shown with `orderFrontRegardless()`;
+  - `becomesKeyOnlyIfNeeded = true`, so a peek never activates the app.
+
+  `NotchController` **corrects DynamicNotchKit** in two places on this panel: DynamicNotchKit
+  omits `.fullScreenAuxiliary` (without it the panel does not sit over another app's
+  full-screen — `NotchController` **adds** it), and it hardcodes `canBecomeKey = true`.
+  `NotchController` **gates key-ness per state**: the ambient pill is **click-through and never
+  key** (`ignoresMouseEvents = true`, toggled on when only the expanded console should take
+  clicks), so focus is preserved on peek. Private **SkyLight**
+  (`CGSGetActiveSpace` / `CGSCopyManagedDisplaySpaces`) is **not** used to draw — it is used
+  only by the per-Space suppression path (§3.4, `FrontmostContextProviding`), feature-detected
+  and degrading to the coarse `NSWorkspace.frontmostApplication` check. See
+  [DESIGN.md §10.1–§10.2](DESIGN.md#101-the-overlay-is-public-api).
+
+- **`WKWebView` live-preview surface** — the Build-stage `livePreview` renderer (`app/`). It
+  loads **untrusted, agent-authored** dev-server content and is **egress-locked by
+  construction** — a `WKContentRuleList` blocking all network except `http://127.0.0.1:PORT`,
+  navigation pinned to that loopback origin via `decidePolicyFor`, no page-reachable
+  `WKScriptMessageHandler`, and a `.nonPersistent()` data store. See
+  [DESIGN.md §14.2](DESIGN.md#142-livepreview-renders-untrusted-content--egress-locked-by-construction).
+
 ---
 
 ## 4. The capability model as a type-level guarantee
@@ -212,7 +241,11 @@ spawning duplicates.
   each connection run on their own `Thread`s doing blocking POSIX I/O, so a handler that
   legitimately blocks for minutes (a human deciding a gate) ties up only that one connection
   thread. A blocked gate is modeled app-side as a parked `CheckedContinuation` resumed by
-  `resolve(_:)`.
+  `resolve(_:)`. Connection threads are **bounded** (a semaphore; accept-then-close beyond the
+  cap) and each NDJSON line is capped at **1 MiB**; if a connection closes while a gate is
+  parked, the continuation resumes **abandoned** and the lane is cleared (the app-side dual of
+  fail-open). These lifecycle rails — plus sidecar reclaim, store durability, `CGEventTap` health,
+  and stale-socket handling — are normative in [SUPERVISION.md](SUPERVISION.md).
 - **UI is `@MainActor`.** The SwiftUI console and `NotchController` observe `SessionStore`
   snapshots across the actor boundary; decisions are sent back into the provider.
 - **No polling anywhere.** Socket readability, actor messages, and SwiftUI observation are all
