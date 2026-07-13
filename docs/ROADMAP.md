@@ -95,7 +95,7 @@ Tie sessions to the surrounding dev context.
       additive `AgentEvent.artifact` field; the `livePreview` `WKWebView` is egress-locked to a
       single loopback origin ([DESIGN.md §14](DESIGN.md#14-the-build-stage))
 - [ ] Build / CI / git surfacing: Xcode build status, `gh` PR + CI checks
-- [ ] NotchFlow-style worktree browser tying sessions to branches
+- [ ] A worktree browser tying sessions to branches
 - [ ] Optional on-demand inline editing — **only** if a genuinely stable editor component
       exists (reassess CodeEditSourceEditor 1.0 status)
 

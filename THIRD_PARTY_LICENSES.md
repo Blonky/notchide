@@ -1,8 +1,7 @@
 # Third-party licenses & attribution
 
-notchide is MIT-licensed (see [LICENSE](LICENSE)). It builds on, and was informed by, the work
-of others. This document records the dependencies notchide ships or plans to ship, and the prior
-art it studied but did not fork.
+notchide is MIT-licensed (see [LICENSE](LICENSE)). This document records the third-party code
+notchide ships or plans to ship, and the licenses it must honor.
 
 If you believe an attribution here is inaccurate or incomplete, please open an issue — getting
 this right matters to us.
@@ -61,23 +60,8 @@ diff — notchide is **not** a code editor and does not embed a pre-1.0 editor.
 
 ---
 
-## Prior art — studied, not forked
+## Prior art
 
-notchide exists in a lively "notch tools" ecosystem. The projects below shaped our thinking. We
-**studied** them for ideas and interaction patterns; we did **not** fork, copy, or incorporate
-their code. They are listed here out of respect and for transparency, with their licenses noted.
-
-| Project        | Author  | License        | Relationship to notchide                                            |
-| -------------- | ------- | -------------- | ------------------------------------------------------------------- |
-| klo-local      | elvniv  | Apache-2.0     | Studied — approach to local agent status in the notch.              |
-| NotchFlow      | —       | MIT            | Studied — worktree/branch surfacing (informs the v0.3 direction).   |
-| CodeIsland     | —       | MIT            | Studied — coding-context presentation in a notch surface.           |
-| Claude Island  | —       | Apache-2.0     | Studied — Claude-session status in the notch.                       |
-| boring.notch   | —       | CC-BY-NC-ND    | **Study only.** Its license is non-commercial, no-derivatives; no code was used or adapted. |
-
-**Note on boring.notch:** its CC-BY-NC-ND license permits neither derivative works nor
-commercial use. notchide contains none of its code and is not derived from it; it is listed
-solely to acknowledge prior art we looked at.
-
-None of the projects above are dependencies of notchide. The only third-party code notchide
-ships is listed in the sections above.
+notchide was inspired by the Mac notch itself and the idea of surfacing live status there. It
+does **not** fork, copy, or incorporate any other project's code — the only third-party code
+notchide ships is listed in the sections above.
