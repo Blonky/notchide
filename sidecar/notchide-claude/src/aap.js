@@ -161,6 +161,8 @@ export function encodeLine(obj) {
 
 /**
  * Duplex NDJSON client over notchide's Unix socket. Emits:
+ *   'socket'   (socket)  the raw socket, on every (re)connect attempt, so a
+ *                        lifeline watcher can observe its end/close/error
  *   'connect'            once the handshake line has been written
  *   'actuate'  (frame)   an inbound ActuateFrame {sessionKey, kind, text}
  *   'decision' (frame)   an inbound AgentDecision {id, verdict, reason, redirect}
@@ -229,6 +231,11 @@ export class AapClient extends EventEmitter {
       this.emit('disconnect');
       this._scheduleReconnect();
     });
+
+    // Hand the raw socket to any lifeline watcher (see SelfExit): it needs the
+    // socket's own 'end'/'close'/'error' events, including an 'error' that may
+    // fire before 'connect'. Emitted after our own handlers are attached.
+    this.emit('socket', socket);
   }
 
   _onData(chunk) {

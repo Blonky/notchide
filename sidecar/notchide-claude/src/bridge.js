@@ -147,11 +147,20 @@ export class Bridge {
 
     this.input = new MessageQueue();
     this.query = null;
+    // The query's kill switch: passed into the SDK so `teardown()` can hard-
+    // cancel the live (paid) session. Honors a caller-supplied controller.
+    this._abortController = sdkOptions.abortController ?? new AbortController();
     this._sdkSessionId = null; // adopted from the first message that carries one
     this._fallbackId = randomUUID(); // stable id until the SDK reports its own
     this._pendingDecisions = new Map(); // envelope id -> {resolve, timer}
     this._started = false;
     this._stopped = false;
+    this._tornDown = false;
+  }
+
+  /** Whether the live query has been aborted via `teardown()`. */
+  get aborted() {
+    return this._abortController.signal.aborted;
   }
 
   /** One stable agentSessionID per session: the SDK session id when known,
@@ -396,6 +405,9 @@ export class Bridge {
       cwd: this.cwd,
       canUseTool: (name, input, o) => this.canUseTool(name, input, o),
       ...this.sdkOptions,
+      // Our abort controller always wins: `teardown()` must be able to cancel
+      // the paid session regardless of what sdkOptions carried.
+      abortController: this._abortController,
     };
 
     this.query = this.queryFn({ prompt: this.input, options });
@@ -436,6 +448,30 @@ export class Bridge {
       p.resolve(null); // release any awaiting canUseTool (fail-open)
     }
     this._pendingDecisions.clear();
+  }
+
+  /**
+   * Hard-cancel the live (paid) query, then run the normal `stop()` teardown.
+   * Called when the AAP lifeline drops or a termination signal arrives, so a
+   * running session is never orphaned behind a dead hub. Idempotent.
+   *
+   * Aborts the SDK's AbortController (the sanctioned cancel), then best-effort
+   * `return()`s the query generator so the `_consume()` loop unwinds even for a
+   * transport that does not observe the signal.
+   */
+  teardown() {
+    if (this._tornDown) return;
+    this._tornDown = true;
+    try {
+      this._abortController.abort();
+    } catch { /* ignore */ }
+    const q = this.query;
+    if (q && typeof q.return === 'function') {
+      try {
+        Promise.resolve(q.return()).catch(() => {});
+      } catch { /* ignore */ }
+    }
+    this.stop();
   }
 }
 
