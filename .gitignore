@@ -69,3 +69,6 @@ Icon
 .env
 .env.local
 *.local
+
+# Node (sidecar)
+node_modules/
