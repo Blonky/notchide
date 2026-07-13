@@ -74,8 +74,21 @@ public struct AgentEvent: Sendable, Codable, Equatable {
         self.command = command
         self.decision = decision
         self.payload = payload
-        self.at = at
+        self.at = AgentEvent.normalizedTimestamp(at)
         self.artifact = artifact
+    }
+
+    /// Quantizes an event timestamp to whole milliseconds so it survives a JSON
+    /// epoch-seconds round-trip exactly.
+    ///
+    /// `Date()` carries sub-microsecond precision whose 16–17 significant-digit
+    /// decimal is not reliably emitted by the number encoder, so a re-decoded
+    /// event could differ in its last bits and break value equality (the flaky
+    /// `frameClassification` failure). The wire contract is "epoch seconds, may be
+    /// fractional"; millisecond resolution (≤13 significant digits) honors it,
+    /// always round-trips, and is ample for the cockpit.
+    static func normalizedTimestamp(_ date: Date) -> Date {
+        Date(timeIntervalSince1970: (date.timeIntervalSince1970 * 1000).rounded() / 1000)
     }
 
     // MARK: - Lenient Codable (flat wire shape; never throws on odd input)
@@ -108,7 +121,7 @@ public struct AgentEvent: Sendable, Codable, Equatable {
 
         self.payload = dict["payload"] ?? .object([:])
         if let seconds = dict["at"]?.doubleValue {
-            self.at = Date(timeIntervalSince1970: seconds)
+            self.at = AgentEvent.normalizedTimestamp(Date(timeIntervalSince1970: seconds))
         } else {
             self.at = Date(timeIntervalSince1970: 0)
         }
