@@ -25,10 +25,28 @@ public final class UnixSocketServer: @unchecked Sendable {
     /// Invoked once per connection with its validated handshake, before any
     /// envelopes are processed.
     public typealias HandshakeObserver = @Sendable (_ handshake: AAPHandshake) async -> Void
+    /// Invoked when an in-flight decision is ABANDONED because the peer closed
+    /// the connection before the handler answered (rail 1). Gives the app the
+    /// hook it needs to clear the wedged lane (e.g. `SessionStore.abandonGate`).
+    /// No decision frame is written for an abandoned request.
+    public typealias AbandonObserver = @Sendable (_ envelope: AgentEnvelope) async -> Void
+
+    /// The default cap on concurrent connection handlers.
+    public static let defaultMaxConnections = 32
+    /// The default hard cap on a single NDJSON line (1 MiB).
+    public static let defaultMaxLineBytes = 1 << 20
 
     public let socketPath: String
     private let handler: Handler
     private let onHandshake: HandshakeObserver?
+    private let onAbandon: AbandonObserver?
+    private let maxLineBytes: Int
+
+    /// Bounds the number of connection handlers running at once (rail 2). A slot
+    /// is taken before a connection thread is spawned and released when it ends;
+    /// a connection that arrives at capacity is accepted-then-immediately-closed
+    /// so the fail-open adapter treats it as "proceed".
+    private let connectionSlots: DispatchSemaphore
 
     /// Live actuate-capable connections, so the server can PUSH `ActuateFrame`s
     /// back to a specific provider's connection (the duplex direction).
@@ -40,16 +58,28 @@ public final class UnixSocketServer: @unchecked Sendable {
 
     /// - Parameters:
     ///   - socketPath: Filesystem path to bind. Overridable for tests.
+    ///   - maxConnections: Cap on concurrent connection handlers (default 32).
+    ///     Excess connections are accepted then immediately closed (fail-open).
+    ///   - maxLineBytes: Hard cap on a single NDJSON line (default 1 MiB). A
+    ///     connection sending more than the cap with no newline is dropped.
     ///   - onHandshake: Optional callback invoked with each connection's
     ///     validated handshake (used to register the provider's capabilities).
+    ///   - onAbandon: Optional callback invoked when an in-flight decision is
+    ///     abandoned by peer-close, so the app can clear the affected lane.
     ///   - handler: Async handler invoked for every received envelope.
     public init(
         socketPath: String = NotchidePaths.socketPath,
+        maxConnections: Int = UnixSocketServer.defaultMaxConnections,
+        maxLineBytes: Int = UnixSocketServer.defaultMaxLineBytes,
         onHandshake: HandshakeObserver? = nil,
+        onAbandon: AbandonObserver? = nil,
         handler: @escaping Handler
     ) {
         self.socketPath = socketPath
         self.onHandshake = onHandshake
+        self.onAbandon = onAbandon
+        self.maxLineBytes = maxLineBytes
+        self.connectionSlots = DispatchSemaphore(value: max(1, maxConnections))
         self.handler = handler
         self.actuateRegistry = ActuateRegistry()
     }
@@ -173,16 +203,31 @@ public final class UnixSocketServer: @unchecked Sendable {
             let clientFlags = fcntl(clientFD, F_GETFL, 0)
             _ = fcntl(clientFD, F_SETFL, clientFlags & ~O_NONBLOCK)
 
+            // Bounded concurrency (rail 2): try to claim a handler slot without
+            // blocking the accept loop. At capacity, close the connection
+            // immediately — the fail-open adapter sees EOF and proceeds — so a
+            // burst of connections can never exhaust threads/fds.
+            if connectionSlots.wait(timeout: .now()) == .timedOut {
+                close(clientFD)
+                continue
+            }
+
             // Each connection gets its own thread so a slow handler (e.g. a
             // human deciding a permission gate) cannot block other connections.
             let connectionHandler = handler
             let connectionHandshake = onHandshake
+            let connectionAbandon = onAbandon
             let connectionRegistry = actuateRegistry
+            let connectionMaxLineBytes = maxLineBytes
+            let slots = connectionSlots
             Thread.detachNewThread {
+                defer { slots.signal() } // release the slot when the handler ends
                 UnixSocketServer.handleConnection(
                     fd: clientFD,
                     handler: connectionHandler,
                     onHandshake: connectionHandshake,
+                    onAbandon: connectionAbandon,
+                    maxLineBytes: connectionMaxLineBytes,
                     registry: connectionRegistry)
             }
         }
@@ -192,15 +237,20 @@ public final class UnixSocketServer: @unchecked Sendable {
         fd: Int32,
         handler: @escaping Handler,
         onHandshake: HandshakeObserver?,
+        onAbandon: AbandonObserver?,
+        maxLineBytes: Int,
         registry: ActuateRegistry
     ) {
         defer { close(fd) }
-        let reader = FDLineReader(fd: fd)
+        // Bounded reader (rail 3): a line longer than `maxLineBytes` with no
+        // newline is dropped rather than buffered without bound.
+        let reader = BoundedLineReader(fd: fd, maxLineBytes: maxLineBytes)
 
         // ── AAP handshake: the first line MUST be a supported handshake ────────
-        // An absent, malformed, or wrong-version handshake closes the connection
-        // (the client then sees EOF and falls open). An `AgentEnvelope` frame has
-        // no `aap` field, so it can never be mistaken for a valid handshake.
+        // An absent, malformed, oversized, or wrong-version handshake closes the
+        // connection (the client then sees EOF and falls open). An
+        // `AgentEnvelope` frame has no `aap` field, so it can never be mistaken
+        // for a valid handshake.
         let firstLine = reader.nextLine()
         guard case .line(let handshakeBytes) = firstLine,
               let handshake = try? JSONDecoder().decode(AAPHandshake.self, from: Data(handshakeBytes)),
@@ -235,7 +285,9 @@ public final class UnixSocketServer: @unchecked Sendable {
 
         loop: while true {
             switch reader.nextLine() {
-            case .closed, .timedOut:
+            case .closed, .timedOut, .overflow:
+                // `.overflow` (rail 3): an oversized line drops the connection,
+                // identically to EOF — never buffered, never a crash.
                 break loop
             case .line(let bytes):
                 if bytes.isEmpty { continue }
@@ -246,21 +298,148 @@ public final class UnixSocketServer: @unchecked Sendable {
                 // asked for one AND advertised `gate`; escalation from a
                 // non-gate provider is ignored.
                 let decisionAllowed = envelope.wantsDecision && capabilities.contains(.gate)
-                let decision = runBlocking { await handler(envelope, capabilities) }
-                if decisionAllowed, let decision, let frame = try? NDJSON.encode(decision) {
-                    // On an actuate-capable connection, route the decision
-                    // writeback through the same serialized writer used by
-                    // pushes, so a concurrent actuate push cannot interleave
-                    // with the decision on the shared fd. On a gate-only
-                    // connection there is no second writer, so write directly —
-                    // preserving the original behavior exactly.
-                    if let actuateConnection {
-                        actuateConnection.write(Array(frame))
-                    } else {
-                        writeAllBytes(fd: fd, Array(frame))
+                if decisionAllowed {
+                    // Rail 1: run the (possibly long-parked) decision while
+                    // watching the fd for peer-close. If the peer disconnects
+                    // first, the request is abandoned deterministically — no
+                    // frame is written and the app is notified so it can clear
+                    // the lane — instead of leaking a parked continuation.
+                    switch awaitDecisionOrAbandon(
+                        fd: fd, envelope: envelope,
+                        capabilities: capabilities, handler: handler
+                    ) {
+                    case .decided(let decision):
+                        if let decision, let frame = try? NDJSON.encode(decision) {
+                            // On an actuate-capable connection, route the
+                            // decision writeback through the same serialized
+                            // writer used by pushes, so a concurrent actuate
+                            // push cannot interleave with the decision on the
+                            // shared fd. On a gate-only connection there is no
+                            // second writer, so write directly.
+                            if let actuateConnection {
+                                actuateConnection.write(Array(frame))
+                            } else {
+                                writeAllBytes(fd: fd, Array(frame))
+                            }
+                        }
+                    case .abandoned:
+                        if let onAbandon {
+                            runBlocking { await onAbandon(envelope) }
+                        }
+                        break loop // the peer is gone; end the connection
                     }
+                } else {
+                    // Fire-and-forget (observe/notify): drive the handler for
+                    // its side effects but never write a decision back.
+                    _ = runBlocking { await handler(envelope, capabilities) }
                 }
             }
         }
+    }
+
+    /// Outcome of racing a decision handler against peer-close.
+    private enum DecisionOutcome {
+        /// The handler produced a verdict (possibly `nil`) before the peer left.
+        case decided(AgentDecision?)
+        /// The peer closed the connection before the handler answered.
+        case abandoned
+    }
+
+    /// Runs `handler` on a cancellable task while this (blocking) connection
+    /// thread polls `fd` for peer-close. Returns `.decided` if the handler
+    /// answers first, or `.abandoned` if the peer disconnects while the decision
+    /// is still pending.
+    ///
+    /// Only the connection thread ever reads `fd` here (the handler task is
+    /// handed the envelope, not the fd), so there is no concurrent reader; once
+    /// this returns, the caller resumes owning the fd exclusively.
+    private static func awaitDecisionOrAbandon(
+        fd: Int32,
+        envelope: AgentEnvelope,
+        capabilities: Set<Capability>,
+        handler: @escaping Handler
+    ) -> DecisionOutcome {
+        let state = PendingDecision()
+        let task = Task.detached {
+            let decision = await handler(envelope, capabilities)
+            state.complete(decision)
+        }
+
+        while true {
+            // A ready decision always wins the race: deliver it even if the peer
+            // also just left (a write to a gone peer fails harmlessly).
+            if let decision = state.takeIfComplete() {
+                return .decided(decision)
+            }
+
+            var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            let pr = poll(&pfd, 1, 20) // 20ms tick: re-check completion + close
+            if pr < 0 {
+                if errno == EINTR { continue }
+                // Cannot poll for close; fall back to simply awaiting the
+                // decision so we neither spin nor abandon a live request.
+                return .decided(state.waitForCompletion())
+            }
+            if pr == 0 { continue } // timeout: loop re-checks completion
+
+            let revents = pfd.revents
+            if (revents & (Int16(POLLHUP) | Int16(POLLERR) | Int16(POLLNVAL))) != 0 {
+                task.cancel()
+                return .abandoned
+            }
+            if (revents & Int16(POLLIN)) != 0 {
+                // Readable during a pending decision means either EOF (peer
+                // closed) or unexpected pipelined data. Peek without consuming:
+                // a 0/Error peek is a clean close → abandon; stray data is
+                // ignored (the decision, when it lands, still wins).
+                var probe: UInt8 = 0
+                let n = recv(fd, &probe, 1, Int32(MSG_PEEK))
+                if n <= 0 {
+                    if n < 0 && errno == EINTR { continue }
+                    task.cancel()
+                    return .abandoned
+                }
+                // Stray data: brief nap so a flooding peer cannot hot-spin us.
+                usleep(20_000)
+            }
+        }
+    }
+}
+
+/// Thread-safe one-shot box holding a decision handler's result.
+///
+/// The handler task calls `complete`; the connection thread polls `takeIfComplete`.
+/// A double optional distinguishes "not done yet" (`nil`) from "done with a
+/// (possibly `nil`) decision" (`.some`).
+private final class PendingDecision: @unchecked Sendable {
+    private let lock = NSLock()
+    private let done = DispatchSemaphore(value: 0)
+    private var completed = false
+    private var decision: AgentDecision?
+
+    func complete(_ decision: AgentDecision?) {
+        lock.lock()
+        if !completed {
+            completed = true
+            self.decision = decision
+            done.signal()
+        }
+        lock.unlock()
+    }
+
+    /// Returns `.some(decision)` once completed, else `nil`.
+    func takeIfComplete() -> AgentDecision?? {
+        lock.lock()
+        defer { lock.unlock() }
+        return completed ? .some(decision) : nil
+    }
+
+    /// Blocks until the handler completes, then returns its decision. Used only
+    /// on the poll-failure fallback path.
+    func waitForCompletion() -> AgentDecision? {
+        done.wait()
+        lock.lock()
+        defer { lock.unlock() }
+        return decision
     }
 }
