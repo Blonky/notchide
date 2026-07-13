@@ -150,28 +150,34 @@ public actor SessionStore {
             (state == .needsYou && event.kind == .needsDecision && capability == .blocking)
             ? event.decision : nil
 
-        var lane = lanes[key] ?? Lane(
-            id: key,
-            providerID: event.providerID,
-            decisionCapability: capability,
-            cwd: event.sessionKey.cwd,
-            state: state,
-            lastEvent: event.kind.rawValue,
-            lastCommand: command,
-            pendingDecision: pending,
-            updatedAt: timestamp,
-            lastEventAt: timestamp
-        )
-        lane.providerID = event.providerID
-        lane.decisionCapability = capability
-        if !event.sessionKey.cwd.isEmpty { lane.cwd = event.sessionKey.cwd }
-        lane.state = state
-        lane.lastEvent = event.kind.rawValue
-        if let command { lane.lastCommand = command }
-        lane.pendingDecision = pending
-        lane.updatedAt = timestamp
-        lane.lastEventAt = timestamp
-        lanes[key] = lane
+        if var lane = lanes[key] {
+            // Update in place: cwd and lastCommand are only overwritten when the
+            // new event carries them, so an event with an empty cwd / no command
+            // does not erase what the lane already knows.
+            lane.providerID = event.providerID
+            lane.decisionCapability = capability
+            if !event.sessionKey.cwd.isEmpty { lane.cwd = event.sessionKey.cwd }
+            lane.state = state
+            lane.lastEvent = event.kind.rawValue
+            if let command { lane.lastCommand = command }
+            lane.pendingDecision = pending
+            lane.updatedAt = timestamp
+            lane.lastEventAt = timestamp
+            lanes[key] = lane
+        } else {
+            lanes[key] = Lane(
+                id: key,
+                providerID: event.providerID,
+                decisionCapability: capability,
+                cwd: event.sessionKey.cwd,
+                state: state,
+                lastEvent: event.kind.rawValue,
+                lastCommand: command,
+                pendingDecision: pending,
+                updatedAt: timestamp,
+                lastEventAt: timestamp
+            )
+        }
 
         broadcast()
         return state
