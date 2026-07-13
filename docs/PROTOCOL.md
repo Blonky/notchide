@@ -115,7 +115,12 @@ commands** — and through which a voice prompt can **drive** an agent — so it
 reachability is a security property, not a convenience:
 
 - The app MUST bind on the local filesystem only and MUST NOT bind anything
-  routable. There is no TCP, no port, no network listener of any kind.
+  routable. The one documented exception is the **OTLP enrichment receiver** (§3.3),
+  a **loopback-only** TCP port that carries observe-only telemetry and can never
+  gate — it is called out explicitly here precisely because it is the sole port the
+  app opens. Everything on the AAP write path (handshake, envelope, decision,
+  actuate) stays on the Unix socket; there is no other TCP, no other port, no other
+  network listener of any kind.
 - The socket file MUST be `0600` (owner read/write only). The reference
   implementation `chmod`s to `0600` **before** `listen()`, so the socket is never
   reachable while world-accessible.
@@ -142,6 +147,43 @@ each line without any out-of-band tag:
 A line whose top-level key matches none of these is **ignored** — a newer or odd
 frame is skipped, never fatal — mirroring the lenient decode of §8.
 (`NotchideKit`: `AAPFrame.classify`.)
+
+### 3.3 The OTLP enrichment transport (loopback exception)
+
+Beside the AAP Unix socket, the app runs one **observe-only** ingress that is
+**not** a Unix socket and **not** part of the AAP write path: an **OpenTelemetry
+(OTLP/HTTP) receiver on `:4318`**. It exists so a coding agent that already speaks
+OTLP can enrich a lane with **tokens / cost / model** for free, by pointing
+`OTEL_EXPORTER_OTLP_ENDPOINT` at the port. It is the one documented exception to the
+"binds nothing routable" rule of §3.1, and it is fenced accordingly:
+
+- **Loopback only.** The receiver MUST bind `127.0.0.1` only — never `0.0.0.0`,
+  never a routable address. It is a TCP port purely because OTLP requires one.
+- **Unauthenticated → untrusted.** OTLP carries no peer authentication, so the
+  receiver MUST treat every body as untrusted: **cap the body size**, decode
+  leniently, and never let an OTLP record drive a gate or an actuate. On
+  `EADDRINUSE` it MUST **fall back** (try the next candidate port / degrade) rather
+  than fail hard.
+- **`http/json`, low intervals.** The app forces
+  `OTEL_EXPORTER_OTLP_PROTOCOL=http/json` and sets **low export intervals** — the
+  vendor defaults (metrics `60000 ms`, logs `5000 ms`) are far too laggy for an
+  ambient cockpit.
+
+**Enrichment, never lifecycle.** OTLP records are **merged onto the lane the
+hook/sidecar already owns**, keyed by a **shared session id** — Claude's OTLP
+`session.id` equals the `PreToolUse` hook's `session_id`; Codex's `conversation.id`
+plays the same role (§10). Claude Code emits **no** session-start/end over OTLP, so
+OTLP neither opens nor reliably **closes** a lane: it colors an existing lane in and
+**MUST NOT** close a lane the hook still shows blocking. An OTLP `*.tool_decision`
+record is **post-hoc** — a report of a decision already made, **not** a gate.
+
+**PROOF cannot ride OTLP.** A real `gate`/`actuate` is request/response with the
+*agent* as client, and OTLP has **no server→client frame** to carry a verdict back
+or push a prompt. Gates and voice prompts therefore stay on the duplex AAP socket
+(§6, §7); the OTLP lane is structurally the **notify-only** provider of §2. (Prior
+art: the shipped competitor **agentnotch**,
+[github.com/AppGram/agentnotch](https://github.com/AppGram/agentnotch), also listens
+on `:4318` as observe-only.)
 
 ---
 
@@ -212,6 +254,7 @@ degrades gracefully rather than breaking the fan-in.
 | `title`          | string        | no                               | Short human label. **Omitted when absent** (not sent as `null`). |
 | `command`        | string        | no                               | Human-readable command for the lane. **Omitted when absent.** |
 | `decision`       | object        | present **iff** `kind == needsDecision` | `{ "id": "<uuid>", "prompt": "<string>" }`. **Omitted otherwise.** `id` MUST be a valid UUID (typically equal to the envelope `id`); if it is not parseable the event decodes with no decision. |
+| `artifact`       | object        | no                               | The turn's **`BuildArtifact`** — the Build stage's tangible output, one of `livePreview(url)` / `diff` / `tests` / `logs` / `document` / `screens` / `error`. An **additive** field (§8); set **only** by HOST adapters that own an output stream to classify (the `{observe, gate}` hook never sets it). **Omitted when absent.** See [DESIGN.md §14](DESIGN.md#14-the-build-stage). |
 | `payload`        | object        | yes*                             | The full original vendor payload, preserved losslessly. Defaults to `{}`. |
 | `at`             | number        | yes*                             | Event time as **epoch seconds** (may be fractional). Defaults to `0` if absent. |
 
@@ -359,6 +402,11 @@ voice cannot one-word-approve an `rm -rf`. The product framing of this rule live
   `actuate` **capability** (§2, §7) were added exactly this way: a purely additive
   extension within `aap/1`, invisible to an adapter that speaks only the earlier
   `{observe, gate}` subset.
+- **The `AgentEvent.artifact` field is additive, too.** The Build stage's
+  `BuildArtifact` (§5.1) rides on the existing `AgentEvent` as one more optional
+  field — no new frame, no `aap` bump. Only HOST adapters that own an output stream
+  set it; a `{observe, gate}` adapter (the reference hook) omits it, and an older app
+  ignores it. Adding it required no wire-version change, by exactly the rule above.
 - **Do not depend on field order or on `null` vs. omitted** (§5.2).
 
 ---

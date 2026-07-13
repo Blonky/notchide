@@ -76,7 +76,10 @@ Add a second **built-in** provider that is *not* Claude Code, to prove AAP's ven
 anger, and grow the cockpit to many concurrent sessions.
 
 - [ ] **OTLP `:4318`** passive listener as the second built-in provider — **notify-only**
-      (`observe` only, no `gate`), exercising the capability model end to end (incl. Codex)
+      (`observe` only, no `gate`), exercising the capability model end to end (incl. Codex). It
+      **enriches** a hook/sidecar-owned lane (tokens/cost/model) by shared session id and never
+      owns lifecycle or gates — design [DESIGN.md §13](DESIGN.md#13-the-otlp-enrichment-plane-observe-only),
+      transport [PROTOCOL.md §3.3](PROTOCOL.md#33-the-otlp-enrichment-transport-loopback-exception)
 - [ ] Multi-session stack view (many providers' lanes at once)
 - [ ] Token / cost / tool-timeline surfaced in the cockpit
 - [ ] Usage-% glyph
@@ -87,6 +90,10 @@ anger, and grow the cockpit to many concurrent sessions.
 
 Tie sessions to the surrounding dev context.
 
+- [ ] **Build stage** — HOST-mode-only, a provider-classified `BuildArtifact`
+      (`livePreview` → `diff` → `tests` → `logs` → `document` → `screens` → `error`) on the
+      additive `AgentEvent.artifact` field; the `livePreview` `WKWebView` is egress-locked to a
+      single loopback origin ([DESIGN.md §14](DESIGN.md#14-the-build-stage))
 - [ ] Build / CI / git surfacing: Xcode build status, `gh` PR + CI checks
 - [ ] NotchFlow-style worktree browser tying sessions to branches
 - [ ] Optional on-demand inline editing — **only** if a genuinely stable editor component
