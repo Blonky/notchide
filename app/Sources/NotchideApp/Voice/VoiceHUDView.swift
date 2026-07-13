@@ -67,6 +67,7 @@ public struct VoiceHUDView: View {
                     }
                 }
                 Spacer(minLength: 0)
+                PTTBadge(hint: model.pttHint)
             }
 
             // The live partial transcript, dimmed — it may still change, so it is
@@ -99,6 +100,7 @@ public struct VoiceHUDView: View {
                     }
                 }
                 Spacer(minLength: 0)
+                PTTBadge(hint: model.pttHint)
             }
 
             // The solidified, editable transcript. Editing (Esc) freezes the grace
@@ -218,14 +220,14 @@ private struct WaveformOrb: View {
     }
 }
 
-/// The target-session chip.
+/// The routing chip: shows the utterance is routed to a target session ("→ …").
 private struct TargetChip: View {
     let label: String
 
     var body: some View {
         HStack(spacing: Theme.Spacing.xs) {
-            Image(systemName: "scope")
-                .font(.system(size: 8, weight: .medium))
+            Image(systemName: "arrow.forward")
+                .font(.system(size: 8, weight: .semibold))
                 .foregroundStyle(Theme.textTertiary)
             Text(label)
                 .font(Typo.chip)
@@ -237,6 +239,26 @@ private struct TargetChip: View {
         .background(Theme.raisedSurface)
         .clipShape(Capsule())
         .overlay(Capsule().stroke(Theme.hairline, lineWidth: 1))
+    }
+}
+
+/// A small keycap badge showing the push-to-talk chord (e.g. "⌃⌥"), so the user
+/// always sees how to (re)engage voice while the HUD is up.
+private struct PTTBadge: View {
+    let hint: String
+
+    var body: some View {
+        Text(hint)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(Theme.textTertiary)
+            .padding(.horizontal, Theme.Spacing.sm)
+            .padding(.vertical, 2)
+            .background(Theme.raisedSurface)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                    .stroke(Theme.hairline, lineWidth: 1)
+            )
     }
 }
 

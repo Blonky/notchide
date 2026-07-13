@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import NotchideKit
 
 /// Spawns and supervises the Node HOST sidecar (`sidecar/notchide-claude`,
@@ -27,12 +28,22 @@ public final class HostSessionLauncher {
     public var onStateChange: ((State) -> Void)?
 
     private let socketPath: String
+    /// Records the spawned sidecar's process-GROUP id so a relaunched hub can
+    /// reclaim an orphaned subtree. Shared with the app's launch-time `reclaim()`.
+    private let pidFile: PidFile
     private var process: Process?
 
-    /// - Parameter socketPath: The socket the sidecar should connect to. Defaults
-    ///   to the canonical `agent.sock`.
-    public init(socketPath: String = NotchidePaths.socketPath) {
+    /// - Parameters:
+    ///   - socketPath: The socket the sidecar should connect to. Defaults to the
+    ///     canonical `agent.sock`.
+    ///   - pidFile: Where the sidecar's pgid is recorded (same file the app's
+    ///     launch-time `reclaim()` inspects). Defaults to `PidFile()`.
+    public init(
+        socketPath: String = NotchidePaths.socketPath,
+        pidFile: PidFile = PidFile()
+    ) {
         self.socketPath = socketPath
+        self.pidFile = pidFile
     }
 
     /// Resolves `node` + the sidecar directory and launches the process. Idempotent
@@ -91,6 +102,7 @@ public final class HostSessionLauncher {
             try process.run()
             self.process = process
             state = .running
+            recordProcessGroup(of: process)
             NSLog("notchide: HOST sidecar started (\(node.path) src/index.js → \(socketPath))")
         } catch {
             state = .failed("failed to launch sidecar: \(error.localizedDescription)")
@@ -98,8 +110,35 @@ public final class HostSessionLauncher {
         }
     }
 
+    /// Persists the sidecar's process-GROUP id so a relaunched hub can reclaim the
+    /// whole orphaned subtree via `kill(-pgid, …)` (see `PidFile`).
+    ///
+    /// Foundation spawns the child as its OWN process-group leader (its pgid
+    /// equals its pid and is distinct from the app's group), so signalling the
+    /// group tears down only the sidecar tree, never the app. Guarded so we never
+    /// persist the app's own group id (which `kill(-pgid, …)` would turn on the
+    /// app itself): if the child is somehow in our group, we skip the record.
+    private func recordProcessGroup(of process: Process) {
+        let pid = process.processIdentifier
+        let pgid = getpgid(pid)
+        guard pgid > 1, pgid != getpgid(0) else {
+            NSLog("notchide: sidecar pgid unavailable (pid=\(pid), pgid=\(pgid)); skipping pid file")
+            return
+        }
+        do {
+            try pidFile.write(pgid: pgid)
+        } catch {
+            NSLog("notchide: failed to persist sidecar pgid \(pgid): \(error.localizedDescription)")
+        }
+    }
+
     /// Terminates the sidecar if running. Idempotent.
     public func stop() {
+        // A graceful stop clears the pid record: the process we started is being
+        // torn down here, so there is no orphan for a later launch to reclaim. A
+        // CRASH (no `stop()`) deliberately leaves the record behind so the next
+        // launch's `reclaim()` reaps the survivor.
+        pidFile.clear()
         guard let process else {
             if state == .running { state = .stopped }
             return

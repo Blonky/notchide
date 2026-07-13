@@ -22,6 +22,7 @@ public final class SocketAAPProvider: AgentProvider, @unchecked Sendable {
     private let stream: AsyncStream<AgentEvent>
     private let streamContinuation: AsyncStream<AgentEvent>.Continuation
     private let onProviderAnnounced: (@Sendable (ProviderID, DecisionCapability) async -> Void)?
+    private let onGateAbandoned: (@Sendable (SessionKey) async -> Void)?
 
     private let lock = NSLock()
     private var pending: [UUID: CheckedContinuation<AgentDecision?, Never>] = [:]
@@ -36,13 +37,19 @@ public final class SocketAAPProvider: AgentProvider, @unchecked Sendable {
     ///   - onProviderAnnounced: Called for each connection's handshake with the
     ///     announced provider id and its derived `DecisionCapability` — wire this
     ///     to `SessionStore.register` so lanes are classified per the handshake.
+    ///   - onGateAbandoned: Called with the abandoned gate's `SessionKey` when the
+    ///     peer disconnects mid-decision (after the parked continuation has been
+    ///     resumed with no decision) — wire this to `SessionStore.abandonGate` so
+    ///     the wedged lane is cleared.
     public init(
         socketPath: String = NotchidePaths.socketPath,
         descriptor: ProviderDescriptor = SocketAAPProvider.defaultDescriptor,
-        onProviderAnnounced: (@Sendable (ProviderID, DecisionCapability) async -> Void)? = nil
+        onProviderAnnounced: (@Sendable (ProviderID, DecisionCapability) async -> Void)? = nil,
+        onGateAbandoned: (@Sendable (SessionKey) async -> Void)? = nil
     ) {
         self.descriptor = descriptor
         self.onProviderAnnounced = onProviderAnnounced
+        self.onGateAbandoned = onGateAbandoned
         var continuation: AsyncStream<AgentEvent>.Continuation!
         self.stream = AsyncStream(bufferingPolicy: .unbounded) { continuation = $0 }
         self.streamContinuation = continuation
@@ -51,6 +58,9 @@ public final class SocketAAPProvider: AgentProvider, @unchecked Sendable {
             socketPath: socketPath,
             onHandshake: { [weak self] handshake in
                 await self?.announce(handshake)
+            },
+            onAbandon: { [weak self] envelope in
+                await self?.abandon(envelope)
             },
             handler: { [weak self] envelope, capabilities in
                 await self?.handle(envelope, capabilities: capabilities) ?? nil
@@ -128,9 +138,45 @@ public final class SocketAAPProvider: AgentProvider, @unchecked Sendable {
         guard envelope.wantsDecision, capabilities.contains(.gate) else {
             return nil
         }
+        // Park until either `resolve(_:)` delivers a verdict or `abandon(_:)`
+        // resumes us with `nil` because the peer disconnected mid-decision. The
+        // parked continuation therefore never leaks: exactly one of those two
+        // paths resumes it (see `takePending`'s remove-under-lock).
         return await withCheckedContinuation { (continuation: CheckedContinuation<AgentDecision?, Never>) in
             storePending(envelope.id, continuation)
         }
+    }
+
+    /// Abandons the in-flight decision for `envelope` because the server observed
+    /// the peer close before the handler answered (`UnixSocketServer.onAbandon`).
+    ///
+    /// Resumes the parked continuation with `nil` — NO decision is emitted, so no
+    /// frame is written and the connection thread unblocks instead of leaking a
+    /// continuation or hanging. `takePending` removes the continuation under the
+    /// lock, so this can never double-resume one that `resolve(_:)` also raced
+    /// for: whichever call wins takes it, the loser is a safe no-op. Then it
+    /// notifies the app (`onGateAbandoned`) so the wedged lane can be cleared.
+    ///
+    /// Ordering: the server only fires `onAbandon` for an envelope on the same
+    /// (`wantsDecision` + `gate`) path that makes `handle` park, and it does so
+    /// after the connection has been serving long enough to reach `poll`, so the
+    /// continuation is already parked by the time this runs. The continuation is
+    /// resumed synchronously up front, before the (awaited) app notification, so
+    /// the parked handler unblocks promptly regardless of the callback.
+    private func abandon(_ envelope: AgentEnvelope) async {
+        takePending(envelope.id)?.resume(returning: nil)
+        await onGateAbandoned?(envelope.event.sessionKey)
+    }
+
+    /// The number of decision continuations currently parked awaiting a verdict.
+    ///
+    /// Internal test seam: after a peer abandons an in-flight gate this must fall
+    /// back to zero promptly — a value that stays above zero is a leaked
+    /// continuation.
+    var parkedDecisionCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return pending.count
     }
 
     // Synchronous lock helpers (NSLock's lock/unlock are unavailable from async

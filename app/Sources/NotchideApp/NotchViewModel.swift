@@ -138,6 +138,10 @@ public final class NotchViewModel: ObservableObject {
     @Published public var voiceText: String = ""
     /// A short label for the target session the utterance is bound to (the chip).
     @Published public var voiceTargetLabel: String?
+    /// The push-to-talk chord hint (e.g. "⌃⌥"), derived from the configured
+    /// `HotkeyConfig`. Surfaced in the voice HUD so the user always sees how to
+    /// re-engage voice. Defaults to the app's control-option binding.
+    @Published public var pttHint: String = PTTTrigger.controlOption.displayName
     /// The silence-while-listening / grace-until-send meter, `0...1`.
     @Published public var voiceMeter: Double = 0
     /// Set in the review window when the user hits Esc to hold the auto-send and
