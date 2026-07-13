@@ -44,6 +44,10 @@ struct OTLPProviderTests {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { return nil }
         defer { close(fd) }
+        // On the oversize path the server closes the connection before we finish
+        // writing the body; suppress SIGPIPE so that write() fails with EPIPE
+        // instead of raising SIGPIPE and killing the whole test process.
+        disableSIGPIPE(fd)
 
         // Bound the client so a misbehaving server can never hang the test.
         var tv = timeval(tv_sec: 5, tv_usec: 0)
