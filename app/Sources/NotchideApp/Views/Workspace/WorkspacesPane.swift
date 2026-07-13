@@ -131,13 +131,7 @@ private struct WorkspaceRow: View {
                 )
             }
         }
-        .padding(Theme.Spacing.md)
-        .background(Color.primary.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                .stroke(access == .control ? Theme.error.opacity(0.35) : Color.primary.opacity(0.08), lineWidth: 1)
-        )
+        .settingsCard(stroke: access == .control ? Theme.error.opacity(0.35) : Color.primary.opacity(0.08))
     }
 
     private var sourceIcon: String {

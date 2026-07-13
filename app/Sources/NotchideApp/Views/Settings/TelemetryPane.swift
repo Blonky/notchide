@@ -46,13 +46,7 @@ struct TelemetryPane: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(Theme.Spacing.md)
-            .background(Color.primary.opacity(0.04))
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-            )
+            .settingsCard()
 
             SettingsCallout(
                 .info,

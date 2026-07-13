@@ -95,13 +95,7 @@ private struct ScreenAccessRow: View {
             }
             .padding(.leading, 22 + Theme.Spacing.md)
         }
-        .padding(Theme.Spacing.md)
-        .background(Color.primary.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                .stroke(access == .control ? Theme.error.opacity(0.35) : Color.primary.opacity(0.08), lineWidth: 1)
-        )
+        .settingsCard(stroke: access == .control ? Theme.error.opacity(0.35) : Color.primary.opacity(0.08))
     }
 
     private var iconForAccess: String {

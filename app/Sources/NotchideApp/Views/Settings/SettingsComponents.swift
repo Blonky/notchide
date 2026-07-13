@@ -70,6 +70,22 @@ struct SettingsCallout: View {
     }
 }
 
+extension View {
+    /// The standard settings-pane card: padded content on a faint fill, rounded to
+    /// the card radius with a hairline border. The border tint is overridable so a
+    /// row can flag a dangerous state (e.g. a Control screen grant).
+    func settingsCard(stroke: Color = Color.primary.opacity(0.08)) -> some View {
+        self
+            .padding(Theme.Spacing.md)
+            .background(Color.primary.opacity(0.04))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                    .stroke(stroke, lineWidth: 1)
+            )
+    }
+}
+
 /// A small pill for a capability / kind tag.
 struct TagChip: View {
     let text: String
