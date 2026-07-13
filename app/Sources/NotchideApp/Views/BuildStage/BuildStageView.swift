@@ -78,7 +78,10 @@ private struct BuildStageHeader: View {
     let artifact: BuildArtifact
 
     var body: some View {
-        HStack(spacing: Theme.Spacing.sm) {
+        // Derive the header model once per render rather than rebuilding it on
+        // each field access below.
+        let model = HeaderModel(artifact: artifact)
+        return HStack(spacing: Theme.Spacing.sm) {
             StatePip(glyph: model.glyph)
             Image(systemName: model.symbol)
                 .font(.system(size: 11, weight: .medium))
@@ -101,8 +104,6 @@ private struct BuildStageHeader: View {
             }
         }
     }
-
-    private var model: HeaderModel { HeaderModel(artifact: artifact) }
 }
 
 /// A tiny header stat descriptor.
