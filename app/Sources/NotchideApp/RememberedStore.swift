@@ -56,7 +56,7 @@ public actor RememberedStore {
         let sorted = commands.sorted()
         guard let data = try? JSONEncoder().encode(sorted) else { return }
         // The support directory is created (0700) at app launch; best-effort here.
-        try? NotchidePaths.ensureSupportDirectory()
+        _ = try? NotchidePaths.ensureSupportDirectory()
         try? data.write(to: url, options: [.atomic])
     }
 
