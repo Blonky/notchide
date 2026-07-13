@@ -47,6 +47,12 @@ public struct AgentEvent: Sendable, Codable, Equatable {
     /// The full original vendor payload, preserved for lossless round-tripping.
     public let payload: JSONValue
     public let at: Date
+    /// The single rendered output of this turn, when the event carries one.
+    ///
+    /// Additive and back-compatible: an encoded `AgentEvent` without an
+    /// `artifact` key decodes to `nil`, and a `nil` artifact is omitted on
+    /// encode, so pre-artifact frames round-trip unchanged.
+    public var artifact: BuildArtifact?
 
     public init(
         providerID: ProviderID,
@@ -57,7 +63,8 @@ public struct AgentEvent: Sendable, Codable, Equatable {
         command: String? = nil,
         decision: DecisionRequest? = nil,
         payload: JSONValue = .object([:]),
-        at: Date = Date()
+        at: Date = Date(),
+        artifact: BuildArtifact? = nil
     ) {
         self.providerID = providerID
         self.sessionKey = sessionKey
@@ -68,6 +75,7 @@ public struct AgentEvent: Sendable, Codable, Equatable {
         self.decision = decision
         self.payload = payload
         self.at = at
+        self.artifact = artifact
     }
 
     // MARK: - Lenient Codable (flat wire shape; never throws on odd input)
@@ -104,6 +112,17 @@ public struct AgentEvent: Sendable, Codable, Equatable {
         } else {
             self.at = Date(timeIntervalSince1970: 0)
         }
+
+        // Back-compat: absent/null `artifact` decodes to nil (decodeIfPresent
+        // semantics). A malformed artifact degrades to nil rather than throwing,
+        // matching the lenient decoding of every other field here.
+        if let artifactValue = dict["artifact"], !artifactValue.isNull,
+           let data = try? JSONEncoder().encode(artifactValue),
+           let decoded = try? JSONDecoder().decode(BuildArtifact.self, from: data) {
+            self.artifact = decoded
+        } else {
+            self.artifact = nil
+        }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -122,6 +141,12 @@ public struct AgentEvent: Sendable, Codable, Equatable {
         }
         dict["payload"] = payload
         dict["at"] = .number(at.timeIntervalSince1970)
+        // Only encode `artifact` when present, so pre-artifact frames keep their
+        // exact wire shape (no stray `"artifact":null` key).
+        if let artifact {
+            let data = try JSONEncoder().encode(artifact)
+            dict["artifact"] = try JSONDecoder().decode(JSONValue.self, from: data)
+        }
 
         var container = encoder.singleValueContainer()
         try container.encode(dict)
