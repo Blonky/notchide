@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Blonky/notchide/schema/aap-1.schema.json",
   "title": "AAP v1 wire frames",
-  "description": "JSON Schema for the three Agent Adapter Protocol (aap/1) NDJSON frame types: the handshake and envelope (adapter -> app), and the decision (app -> adapter). Each frame is one JSON object on one newline-terminated line. Decoders in NotchideKit are lenient (unknown fields ignored, most missing fields defaulted); this schema documents a conformant frame. See docs/PROTOCOL.md.",
+  "description": "JSON Schema for the four Agent Adapter Protocol (aap/1) NDJSON frame types on a duplex connection: the handshake and envelope (adapter -> app), and the decision and actuate frames (app -> adapter). Frames are structurally distinguished by their top-level key (aap / event / verdict / actuate). Each frame is one JSON object on one newline-terminated line. Decoders in NotchideKit are lenient (unknown fields ignored, most missing fields defaulted); this schema documents a conformant frame. See docs/PROTOCOL.md.",
   "$defs": {
     "uuid": {
       "type": "string",
@@ -11,7 +11,7 @@
     "capability": {
       "type": "string",
       "enum": ["observe", "gate", "actuate"],
-      "description": "observe: read-only status. gate: block the agent awaiting a decision. actuate: accept actions back (reserved)."
+      "description": "observe: read-only status. gate: block the agent awaiting a decision. actuate: keep the connection live to RECEIVE app-pushed prompt/interrupt frames (voice ACTUATE); advertised only by HOST-style adapters that own a live agent session."
     },
     "eventKind": {
       "type": "string",
@@ -149,11 +149,67 @@
       },
       "required": ["id", "verdict"],
       "additionalProperties": true
+    },
+    "sessionKey": {
+      "type": "object",
+      "title": "SessionKey (nested tuple; carried by the actuate frame)",
+      "description": "Identifies exactly one session as (provider, agentSessionID, cwd). Routes a pushed action to the host that owns that provider.",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Provider identity, e.g. \"sh.claude.host\"."
+        },
+        "agentSessionID": {
+          "type": "string",
+          "description": "The vendor's session id."
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Working directory."
+        }
+      },
+      "required": ["provider", "agentSessionID", "cwd"],
+      "additionalProperties": true
+    },
+    "actuateFrame": {
+      "type": "object",
+      "title": "ActuateFrame (app -> adapter, PUSH; actuate-capable connections only)",
+      "description": "A voice-driven ACTUATE action pushed to the HOST adapter that owns the target session, over a live actuate-capable connection. All contents live under the top-level 'actuate' key (the framing tag). Pushing to a provider with no live actuate connection is a safe no-op.",
+      "properties": {
+        "actuate": {
+          "type": "object",
+          "properties": {
+            "sessionKey": { "$ref": "#/$defs/sessionKey" },
+            "kind": {
+              "type": "string",
+              "enum": ["prompt", "interrupt"],
+              "description": "prompt delivers a fresh instruction (carries text); interrupt is a barge-in that stops the session (no text)."
+            },
+            "text": {
+              "type": "string",
+              "description": "The instruction to run. Present if and only if kind == prompt; omitted for interrupt."
+            }
+          },
+          "required": ["sessionKey", "kind"],
+          "additionalProperties": true,
+          "allOf": [
+            {
+              "$comment": "text is present iff kind == prompt.",
+              "if": { "properties": { "kind": { "const": "prompt" } }, "required": ["kind"] },
+              "then": { "required": ["text"] },
+              "else": { "not": { "required": ["text"] } }
+            }
+          ]
+        }
+      },
+      "required": ["actuate"],
+      "additionalProperties": true
     }
   },
   "oneOf": [
     { "$ref": "#/$defs/handshake" },
     { "$ref": "#/$defs/envelope" },
-    { "$ref": "#/$defs/decision" }
+    { "$ref": "#/$defs/decision" },
+    { "$ref": "#/$defs/actuateFrame" }
   ]
 }

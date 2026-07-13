@@ -261,7 +261,7 @@ flowchart TB
 ```
 
 The decision flows back down the **same still-open socket connection** that carried the gate.
-The wire-level frame trace is [PROTOCOL.md §11](PROTOCOL.md#11-worked-example-a-blocked-permission-denied).
+The wire-level frame trace is [PROTOCOL.md §12](PROTOCOL.md#12-worked-example-a-blocked-permission-denied).
 
 ---
 

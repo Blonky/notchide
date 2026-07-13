@@ -24,6 +24,35 @@ substrate everything else builds on. Normative spec: [PROTOCOL.md](PROTOCOL.md).
 - [x] Machine-readable [`schema/aap-1.schema.json`](../schema/aap-1.schema.json) + runnable
       [`examples/adapters`](../examples/adapters)
 
+## Foundation — Voice / ACTUATE (landed in the core)
+
+The platform's third verb — **STEER** — on top of NOTIFY + DECIDE: route a *spoken* instruction
+to a **running** session, never keystrokes, never authoring. The wire + pure-core pieces landed
+with the ACTUATE refactor; the mic and host layers are in progress. Design:
+[DESIGN.md §12](DESIGN.md#12-voice-drive-steer-by-voice); wire:
+[PROTOCOL.md §7](PROTOCOL.md#7-the-actuate-frame).
+
+- [x] **Duplex AAP socket** — an `actuate`-capable connection stays alive and can receive
+      app→adapter `ActuateFrame` pushes (a **4th** frame type), classified structurally alongside
+      handshake / envelope / decision (`AAPFrame.classify`, `ActuateRegistry`)
+- [x] `AgentAction.prompt(SessionKey, String)` + `.interrupt`, carried on the wire as an
+      `ActuateFrame` (`kind` ∈ `prompt`/`interrupt`, `text` iff `prompt`) and pushed via
+      `SocketAAPProvider.actuate` — a missing target connection is a **safe no-op**
+- [x] `actuate` capability in the `{observe, gate, actuate}` model — a **HOST** capability
+      advertised only by adapters that own a live session (the `notchide-hook` Claude adapter
+      stays `{observe, gate}`)
+- [x] Pure, headless `VoiceController` — an injectable-clock state machine
+      (`armed → listening → review → sent`) that emits a `VoiceIntent`; `VoiceProvider` +
+      `StubVoiceProvider` keep the whole pipeline mic-free and testable
+- [ ] **Node Agent-SDK host sidecar** (`sh.claude.host`) — owns a streaming Claude session and
+      advertises `actuate` to receive pushed prompts — *in progress*
+- [ ] **Swift mic / push-to-talk layer** — SpeechAnalyzer (primary) + WhisperKit (offline
+      fallback) feeding the `VoiceController`, behind a hold-to-talk HUD — *in progress*
+- [ ] The real end-to-end **mic → prompt → observe-diff → decide** loop on hardware — needs
+      **macOS 26** to validate on-device SpeechAnalyzer and the live host push/gate round-trip
+      (the decide step stays a deliberate click — voice never approves a gate,
+      [PROTOCOL.md §7.3](PROTOCOL.md#73-voice-reaches-actuate-never-gate))
+
 ## v0.1 — the wedge (Claude Code ships)
 
 The minimum lovable cockpit: watch Claude Code sessions, tap only on hard blocks, decide in
@@ -77,7 +106,8 @@ Turn the documented core into a stable, community-extensible platform.
 
 ## Guardrails (every milestone respects these)
 
-- **NOTIFY + DECIDE, never CREATE** — inline editing is a v0.3-at-earliest maybe, never a
-  v0.1/v0.2 surprise.
+- **NOTIFY + DECIDE + STEER-by-voice, never CREATE** — STEER routes a *spoken instruction* to a
+  session, never keystrokes and never authoring; inline editing is a v0.3-at-earliest maybe,
+  never a v0.1/v0.2 surprise.
 - **Fail-open forever** — no roadmap item may make notchide load-bearing in front of an agent.
 - **Silence by default** — new event sources must go through smart suppression, not around it.

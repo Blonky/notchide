@@ -32,8 +32,9 @@ ships today; Codex, Cursor, Aider, or your own agent connect the same way (see
 [Connect any agent](#connect-any-agent)). Everything is **local-first**: a same-machine,
 owner-only Unix socket, nothing routable.
 
-It does two verbs — **NOTIFY** and **DECIDE** — and deliberately never the third,
-**CREATE**. There is no code editor in notchide. It is a cockpit, not an IDE.
+It does three verbs — **NOTIFY**, **DECIDE**, and — hands-free — **STEER** by voice — and
+deliberately never **CREATE**. There is no code editor in notchide: STEER routes a *spoken
+instruction* to a running agent session, never keystrokes. It is a cockpit, not an IDE.
 
 ## What it is
 
@@ -48,6 +49,27 @@ notchide is **one object in two states**.
   **Approve / Deny / Approve-and-remember / one-line redirect**, a live syntax-highlighted
   git diff of what the agent just changed, and a tail of its output. You decide, and the
   panel furls back up. The app behind you was never focused.
+
+## Steer by voice
+
+Hold **⌃⌥**, say what you want, and let go — notchide routes your words to a **running agent
+session** as a fresh instruction, not keystrokes into whatever window has focus. It is the
+platform's third verb, **STEER**, and it is deliberately narrow.
+
+- **Routed to a session, not the focused app.** You steer the session you *summon*, wherever its
+  terminal is — another Space, hidden, behind a fullscreen app. Focus never moves.
+- **HOST vs ATTACH.** A **host** adapter that owns a live session (the Node Agent-SDK sidecar,
+  `sh.claude.host`) gets the prompt **pushed** over the duplex AAP socket and streams progress
+  back. Where nothing hosts the session, notchide **attaches** to a running terminal
+  (`cmux` / `tmux`) — best-effort and degraded.
+- **On-device, local-first.** Speech is recognized on-device (SpeechAnalyzer, with a WhisperKit
+  offline fallback); no audio ever leaves your Mac.
+- **Destructive gates still need a click.** Voice can *start* work but can **never** approve a
+  gate: an `rm -rf` a spoken instruction triggers still stops at the normal permission gate and
+  waits for your deliberate Approve/Deny in the console.
+
+Wire detail: [the actuate frame in PROTOCOL.md](docs/PROTOCOL.md#7-the-actuate-frame).
+Interaction mockup: [docs/media/voice.html](docs/media/voice.html).
 
 ## Demo
 
@@ -83,9 +105,10 @@ notchide and can be written in any language.
   and [examples/providers/](examples/providers) (drop-in provider manifests).
 
 **Capability model (one line).** An adapter advertises what it can do: **`observe`** (report
-status — read-only) and/or **`gate`** (block the agent awaiting your decision). Only a `gate`
-adapter can reach `needs-you` and show Approve/Deny/redirect; an observe-only adapter is
-*notify-only* and structurally cannot seize you.
+status — read-only), **`gate`** (block the agent awaiting your decision), and/or **`actuate`**
+(a live *host* connection that receives voice-driven prompts — see [Steer by voice](#steer-by-voice)).
+Only a `gate` adapter can reach `needs-you` and show Approve/Deny/redirect; an observe-only
+adapter is *notify-only* and structurally cannot seize you.
 
 Claude Code ships in v0.1; other agents are the documented [roadmap](docs/ROADMAP.md).
 

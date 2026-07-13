@@ -1,0 +1,729 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=1160">
+<title>notchide — voice drive</title>
+<style>
+:root{
+  --ink:#eaeaf1; --ink2:#a6a7b2; --ink3:#6f707b; --ink4:#54555f;
+  --text-primary:#ececf0; --text-secondary:#b7b8c4; --text-muted:#7f808b;
+  --hair:rgba(255,255,255,0.10); --hair2:rgba(255,255,255,0.055);
+  --ptop:#1d1f27; --code:#0d0e13;
+  --teal:#34d6ac; --amber:#f5b13a; --green:#54cf95; --red:#f2807a;
+  --add:#54cf95; --addbg:rgba(84,207,149,0.10);
+  --rem:#f2807a; --rembg:rgba(242,128,122,0.10);
+  --kw:#c9a2ff; --ty:#69d6e6; --st:#e3bd7c; --fn:#7fe0c0;
+  --primA:#37d9c1; --primB:#7b78ff;
+  --font-sans:-apple-system,"SF Pro Text",ui-sans-serif,system-ui,sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Monaco,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:#0a0a0f;}
+body{
+  font-family:var(--font-sans);color:var(--ink);
+  background:radial-gradient(120% 90% at 50% -4%, #211d3a 0%, #131019 44%, #09090e 100%);
+  background-attachment:fixed;-webkit-font-smoothing:antialiased;
+}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+
+/* ---------- page scaffold ---------- */
+.wrap{width:1160px;max-width:calc(100% - 40px);margin:0 auto;padding:46px 0 70px}
+.ghead{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin:2px 0 8px}
+.ghead .wm{display:flex;align-items:center;gap:10px;font-size:20px;font-weight:600;color:#f4f4f9;letter-spacing:.2px}
+.ghead .sq{width:13px;height:13px;border-radius:4px;background:linear-gradient(125deg,var(--primA),var(--primB));box-shadow:0 0 14px -2px rgba(123,120,255,.6)}
+.ghead .tag{font-size:14.5px;color:var(--ink2)}
+.ghead .sheet{margin-left:auto;font-family:var(--font-mono);font-size:11.5px;letter-spacing:.6px;color:var(--ink3);text-transform:uppercase}
+.ghead-rule{height:1px;background:linear-gradient(90deg,rgba(255,255,255,.10),rgba(255,255,255,.02) 60%,transparent);margin:20px 0 40px}
+
+/* loop ribbon */
+.loop{display:flex;align-items:center;gap:0;flex-wrap:wrap;margin:0 0 40px}
+.loop .step{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--ink3)}
+.loop .step b{color:#cfd0d9;font-weight:600}
+.loop .step .n{font-family:var(--font-mono);font-size:10.5px;color:#0b1016;background:linear-gradient(125deg,var(--primA),var(--primB));border-radius:5px;padding:2px 6px;line-height:1}
+.loop .to{width:26px;height:16px;color:var(--ink4);flex:none;display:flex;align-items:center;justify-content:center}
+.loop .to svg{width:16px;height:16px}
+
+.card{margin:0 0 52px}
+.clabel{display:flex;align-items:center;gap:13px;margin:0 0 17px}
+.cnum{font-family:var(--font-mono);font-size:11.5px;font-weight:600;letter-spacing:.5px;color:#0b1016;
+  background:linear-gradient(125deg,var(--primA),var(--primB));border-radius:6px;padding:3px 7px;line-height:1}
+.ctitle{font-size:15px;font-weight:600;color:#eaeaf2;letter-spacing:.1px}
+.cline{flex:1;height:1px;background:var(--hair2)}
+.caption{margin:17px 3px 0;font-size:13.5px;color:var(--ink2);line-height:1.5;max-width:900px}
+.caption b{color:#dcdde5;font-weight:600}
+
+/* ---------- desktop screen ---------- */
+.screen{position:relative;border-radius:20px;overflow:hidden;
+  background:radial-gradient(130% 92% at 50% -12%,#242043 0%,#16151f 42%,#0c0c12 100%);
+  box-shadow:0 30px 80px -34px rgba(0,0,0,0.7),0 2px 0 rgba(255,255,255,0.04) inset,0 0 0 1px rgba(255,255,255,0.05);}
+.menubar{position:relative;z-index:5;height:34px;display:flex;align-items:center;justify-content:space-between;
+  padding:0 16px;font-size:13px;color:rgba(233,233,243,0.82);
+  background:linear-gradient(180deg,rgba(18,18,26,0.55),rgba(18,18,26,0.12));
+  -webkit-backdrop-filter:blur(9px);backdrop-filter:blur(9px);border-bottom:1px solid rgba(255,255,255,0.04)}
+.mb-l,.mb-r{display:flex;align-items:center;gap:17px;white-space:nowrap}
+.mb-l .brand{font-weight:500;color:#f3f3f8}
+.mb-r{gap:14px;color:rgba(233,233,243,0.72)}
+.mb-r .clock{color:#f0f0f6;font-variant-numeric:tabular-nums}
+.mi{width:15px;height:15px;opacity:.9;display:inline-block;vertical-align:-.15em}
+
+.ghost{position:absolute;z-index:1;top:64px;width:290px;opacity:.13;filter:blur(0.4px);pointer-events:none;
+  border-radius:10px;border:1px solid rgba(255,255,255,0.25);overflow:hidden}
+.ghost.l{left:36px}.ghost.r{right:40px;top:96px;width:240px}
+.ghost.doc{top:118px;left:64px;width:340px;opacity:.11}
+.ghost .bar{display:flex;align-items:center;gap:6px;padding:7px 9px;background:rgba(255,255,255,0.06)}
+.ghost .gd{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,0.5)}
+.ghost .gu{margin-left:8px;height:13px;flex:1;border-radius:7px;background:rgba(255,255,255,0.14)}
+.ghost .gb{height:118px;background:repeating-linear-gradient(180deg,rgba(255,255,255,0.05) 0 12px,transparent 12px 34px)}
+
+.notch{position:absolute;z-index:6;top:0;left:50%;transform:translateX(-50%);width:420px;height:74px;
+  filter:drop-shadow(0 6px 14px rgba(90,120,255,0.16))}
+.notch.plain{filter:drop-shadow(0 5px 12px rgba(0,0,0,0.4))}
+.notch.teal{filter:drop-shadow(0 6px 16px rgba(52,214,172,0.20))}
+.nglow{position:absolute;z-index:6;top:52px;left:50%;transform:translateX(-50%);width:220px;height:22px;pointer-events:none;
+  background:radial-gradient(ellipse at center,rgba(110,150,255,0.5),rgba(120,120,255,0) 70%);filter:blur(7px);opacity:.65}
+.nglow.teal{background:radial-gradient(ellipse at center,rgba(52,214,172,0.55),rgba(52,214,172,0) 70%);opacity:.7}
+
+/* cockpit beside the notch */
+.cockpit{position:absolute;z-index:7;top:8px;left:calc(50% + 106px);display:flex;align-items:center;gap:12px}
+.agent{display:flex;align-items:center;gap:6px}
+.sdot{width:8px;height:8px;border-radius:50%;position:relative;flex:none}
+.sdot.amber{background:var(--amber);box-shadow:0 0 8px rgba(245,177,58,0.6)}
+.sdot.teal{background:var(--teal);box-shadow:0 0 7px rgba(52,214,172,0.5);animation:breathe 2.6s ease-in-out infinite}
+.sdot.green{background:var(--green);box-shadow:0 0 7px rgba(84,207,149,0.5)}
+.sdot.red{background:var(--red);box-shadow:0 0 7px rgba(242,128,122,0.5)}
+.sdot.amber::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid var(--amber);animation:pulse 1.9s ease-out infinite}
+@keyframes pulse{0%{transform:scale(0.7);opacity:.9}70%{transform:scale(2.1);opacity:0}100%{opacity:0}}
+@keyframes breathe{0%,100%{opacity:.5}50%{opacity:1}}
+
+/* armed mic glyph in cockpit */
+.micpill{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:7px;
+  color:#7fead0;background:rgba(52,214,172,0.13);border:1px solid rgba(52,214,172,0.38);position:relative}
+.micpill svg{width:13px;height:13px}
+.micpill::after{content:"";position:absolute;inset:-4px;border-radius:9px;border:1.5px solid rgba(52,214,172,.45);animation:pulse 2.1s ease-out infinite}
+
+/* provider micro-badge */
+.pb{display:inline-flex;align-items:center;justify-content:center;border-radius:5px;border:1px solid var(--hair);flex:none}
+.pb.sm{width:16px;height:16px}.pb.sm svg{width:10px;height:10px}
+.pb.md{width:20px;height:20px;border-radius:6px}.pb.md svg{width:13px;height:13px}
+.pb.claude{color:#e58c67;background:rgba(217,119,87,0.15);border-color:rgba(217,119,87,0.32)}
+.pb.codex{color:#2fc39c;background:rgba(16,163,127,0.15);border-color:rgba(16,163,127,0.32)}
+.pb.aider{color:#c39bea;background:rgba(185,139,224,0.15);border-color:rgba(185,139,224,0.32)}
+.cockpit .pb{opacity:.9}
+
+/* PTT hint pill under the notch */
+.ptt{position:absolute;z-index:7;top:78px;left:50%;transform:translateX(-50%);
+  display:inline-flex;align-items:center;gap:9px;font-size:12px;color:#c8c9d3;
+  background:rgba(10,11,16,0.72);border:1px solid var(--hair);border-radius:10px;padding:7px 12px;
+  -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);box-shadow:0 12px 30px -18px rgba(0,0,0,.7)}
+.ptt .mg{width:15px;height:15px;color:var(--teal);display:inline-block;vertical-align:-.15em}
+.ptt .sep{width:3px;height:3px;border-radius:50%;background:var(--ink4)}
+
+/* keycaps */
+.kbd{font-family:var(--font-mono);font-size:11px;color:#dcdde4;background:rgba(255,255,255,.07);
+  border:1px solid var(--hair);border-bottom-color:rgba(0,0,0,.45);border-radius:5px;padding:2px 6px;line-height:1;white-space:nowrap}
+
+/* ---------- console panel (grows from notch) ---------- */
+.panelwrap{position:relative;z-index:4;width:min(848px,92%);margin:10px auto 30px}
+.panelwrap.hud{width:min(556px,80%)}
+.panel{position:relative;border-radius:16px;padding:46px 22px 18px;
+  background:linear-gradient(180deg,var(--ptop) 0,var(--ptop) 42px,#191a21 130px,#141419 100%);
+  border:1px solid var(--hair2);border-top:none;
+  box-shadow:0 34px 70px -34px rgba(0,0,0,0.7),0 1px 0 rgba(255,255,255,0.04) inset}
+.panel.voice{padding:42px 20px 18px}
+
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.lead{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500}
+.lead.needs{color:var(--amber)} .lead.watch{color:var(--teal)} .lead.done{color:var(--green)}
+.lead .li{width:15px;height:15px;display:inline-block;vertical-align:-.15em}
+.chips{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-left:auto}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#c7c8d2;
+  background:rgba(255,255,255,0.05);border:1px solid var(--hair2);border-radius:7px;padding:3px 8px;white-space:nowrap}
+.chip .ci{width:13px;height:13px;opacity:.85;display:inline-block;vertical-align:-.15em}
+.chip.mono{font-family:var(--font-mono)}
+.chip.prov{padding:2px 8px 2px 4px;gap:6px}
+
+/* on-device pill */
+.ondev{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;
+  color:#8fdcc9;background:rgba(52,214,172,0.10);border:1px solid rgba(52,214,172,0.26);border-radius:7px;padding:4px 8px}
+.ondev svg{width:12px;height:12px;display:inline-block;vertical-align:-.1em}
+
+/* escape / kbd affordance */
+.escaff{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;color:var(--ink3)}
+
+/* ---------- voice HUD internals ---------- */
+.hudtop{display:flex;align-items:center;gap:11px}
+.orb{position:relative;width:38px;height:38px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;
+  color:#8beccf;background:radial-gradient(circle at 50% 38%,rgba(52,214,172,.30),rgba(52,214,172,.07));
+  border:1px solid rgba(52,214,172,.42)}
+.orb svg{width:17px;height:17px}
+.orb::after{content:"";position:absolute;inset:-5px;border-radius:50%;border:1.5px solid rgba(52,214,172,.5);animation:pulse 1.9s ease-out infinite}
+.orb.rec{color:#f4a7a2;background:radial-gradient(circle at 50% 38%,rgba(242,128,122,.26),rgba(242,128,122,.06));border-color:rgba(242,128,122,.4)}
+.orb.rec::after{border-color:rgba(242,128,122,.5)}
+.hudtitle{display:flex;flex-direction:column;gap:2px;min-width:0}
+.hudtitle .t1{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:#eaeaf2}
+.hudtitle .t2{font-size:11.5px;color:var(--ink3)}
+
+.wave{display:flex;align-items:center;justify-content:center;gap:3px;height:46px;margin:15px 0 4px}
+.wave i{display:block;width:3px;border-radius:2px;background:linear-gradient(180deg,#66e3c4,var(--teal));
+  transform-origin:center;animation:wv .9s ease-in-out infinite alternate}
+@keyframes wv{from{transform:scaleY(.34)}to{transform:scaleY(1)}}
+
+.transcript{font-size:15px;line-height:1.5;margin:8px 2px 2px;letter-spacing:.1px}
+.transcript.partial{color:var(--ink3)}
+.transcript.partial .lead-w{color:var(--ink2)}
+.transcript.final{color:#eef0f5;font-weight:450}
+.tcaret{display:inline-block;width:2px;height:16px;background:var(--teal);vertical-align:-3px;margin-left:2px;
+  border-radius:1px;animation:blink 1.05s steps(1) infinite}
+@keyframes blink{0%,50%{opacity:1}50.01%,100%{opacity:0}}
+
+.hudfoot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px}
+.tchip{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:#bfeadd;
+  background:rgba(52,214,172,0.08);border:1px solid rgba(52,214,172,0.26);border-radius:8px;padding:5px 10px;white-space:nowrap}
+.tchip svg{width:13px;height:13px;display:inline-block;vertical-align:-.12em;opacity:.9}
+.tchip .seg{display:inline-flex;align-items:center;gap:5px}
+.tchip .sep{width:3px;height:3px;border-radius:50%;background:rgba(52,214,172,.45)}
+.tchip .mono{font-family:var(--font-mono);font-size:11.5px}
+.tchip .arw{color:var(--teal)}
+
+/* depleting silence countdown */
+.count{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;color:var(--ink3);margin-left:auto}
+.count .lbl{white-space:nowrap}
+.meter{position:relative;width:66px;height:4px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
+.meter i{position:absolute;inset:0;border-radius:3px;transform-origin:left}
+.meter.deplete i{background:linear-gradient(90deg,var(--teal),#2ab896);animation:deplete 2.6s linear infinite}
+@keyframes deplete{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+
+/* grace bar (review → send) */
+.grace{margin-top:15px;display:flex;flex-direction:column;gap:8px}
+.gracebar{position:relative;height:5px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
+.gracebar i{position:absolute;inset:0;border-radius:3px;transform-origin:left;
+  background:linear-gradient(90deg,var(--primA),var(--primB));animation:fill 2s linear infinite}
+@keyframes fill{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.graceline{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:11.5px;color:var(--ink3)}
+.graceline .g{display:inline-flex;align-items:center;gap:6px}
+.graceline .g b{color:#cfd0d9;font-weight:600}
+.graceline .send{margin-left:auto;color:var(--teal);display:inline-flex;align-items:center;gap:6px;font-weight:600}
+.graceline .send svg{width:14px;height:14px}
+.graceline .gsep{width:3px;height:3px;border-radius:50%;background:var(--ink4)}
+
+.edit-affix{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--ink3);
+  background:rgba(255,255,255,.04);border:1px solid var(--hair2);border-radius:7px;padding:4px 8px;margin-left:8px}
+.edit-affix svg{width:12px;height:12px}
+
+/* ---------- sent / in-flight ---------- */
+.sentchip{display:inline-flex;align-items:center;gap:9px;font-size:12.5px;color:#cbeee1;
+  background:rgba(52,214,172,0.08);border:1px solid rgba(52,214,172,0.26);border-radius:9px;padding:7px 12px;max-width:100%}
+.sentchip .ck{width:16px;height:16px;color:var(--teal);flex:none;display:inline-flex}
+.sentchip .q{color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sentchip b{color:#e5f5ee;font-weight:600}
+
+.sech{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink3);margin:16px 0 9px}
+.sech svg{width:14px;height:14px;display:inline-block;vertical-align:-.15em}
+.sech .live{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--teal);text-transform:none;letter-spacing:0}
+.sech .live .bd{width:6px;height:6px;border-radius:50%;background:var(--teal);animation:breathe 1.4s ease-in-out infinite}
+
+.stream{background:rgba(0,0,0,0.22);border:1px solid var(--hair2);border-radius:11px;padding:12px 15px;
+  font-size:13px;line-height:1.6;color:#c6c7d1}
+.stream .p{margin:0}
+.stream code{font-family:var(--font-mono);font-size:12px;color:#8fd8c6;background:rgba(52,214,172,.08);
+  border:1px solid rgba(52,214,172,.16);border-radius:5px;padding:1px 5px}
+.stream .tcaret{background:#9fb0ff;height:15px}
+
+.divln{height:1px;background:var(--hair2);margin:16px 0}
+.files{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.file{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:#c9cad4;
+  background:rgba(255,255,255,0.045);border:1px solid var(--hair2);border-radius:7px;padding:4px 10px;font-family:var(--font-mono)}
+.file.active{border-color:rgba(123,120,255,0.4);background:rgba(123,120,255,0.10);color:#e7e7ef}
+.file svg{width:14px;height:14px;opacity:.8;color:var(--ink2);display:inline-block;vertical-align:-.15em}
+.file .pl{color:var(--add)} .file .mn{color:var(--rem)}
+
+.diff{background:var(--code);border:1px solid var(--hair2);border-radius:11px;overflow-x:auto;padding:8px 0}
+.diff .hunk{font-family:var(--font-mono);font-size:12px;color:#6fd0c2;padding:2px 14px 6px;white-space:nowrap;opacity:.85}
+.drow{display:flex;align-items:stretch;font-family:var(--font-mono);font-size:12.5px;line-height:20px;white-space:pre;min-width:max-content}
+.ln{flex:0 0 34px;text-align:right;padding-right:8px;color:var(--ink4);user-select:none}
+.sg{flex:0 0 16px;text-align:center;color:var(--ink4);user-select:none}
+.cc{padding-right:18px;color:#cbccd6}
+.add{background:var(--addbg)} .add .sg{color:var(--add)}
+.rem{background:var(--rembg)} .rem .sg{color:var(--rem)}
+.cc .k{color:var(--kw)} .cc .t{color:var(--ty)} .cc .s{color:var(--st)} .cc .f{color:var(--fn)}
+
+/* ---------- gate console ---------- */
+.cmdlabel{font-size:12px;color:var(--ink3);margin:14px 0 7px}
+.cmd{position:relative;display:flex;align-items:center;gap:11px;font-family:var(--font-mono);
+  background:linear-gradient(180deg,#111218,#0d0e13);border:1px solid rgba(255,255,255,0.10);
+  border-radius:11px;padding:13px 15px 13px 16px;overflow-x:auto}
+.cmd::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:11px 0 0 11px;
+  background:linear-gradient(180deg,#4a4c58,#33353f)}
+.cmd.warn{border-color:rgba(245,177,58,0.30)}
+.cmd.warn::before{background:linear-gradient(180deg,#f5b13a,#d68f1e)}
+.cmd.danger{border-color:rgba(242,128,122,0.30)}
+.cmd.danger::before{background:linear-gradient(180deg,#f2807a,#e05a54)}
+.cmd .pr{color:var(--ink4)}
+.cmd .t{font-size:15px;font-weight:500;color:#ececf2;white-space:nowrap;letter-spacing:.2px}
+.cmd .t .dg{color:#ff8a83}
+.cmd .tag{margin-left:auto;display:inline-flex;align-items:center;gap:5px;font-size:11px;white-space:nowrap;
+  border-radius:6px;padding:3px 8px}
+.cmd .tag.amber{color:#f4c980;background:rgba(245,177,58,0.12);border:1px solid rgba(245,177,58,0.3)}
+.cmd .tag.danger{color:#f2b0ac;background:rgba(242,128,122,0.12);border:1px solid rgba(242,128,122,0.3)}
+.cmd .tag svg{width:13px;height:13px;display:inline-block;vertical-align:-.15em}
+
+.actions{display:flex;align-items:center;gap:9px;margin-top:13px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:500;border-radius:9px;
+  padding:9px 16px;cursor:pointer;border:1px solid transparent;line-height:1}
+.btn svg{width:16px;height:16px;display:inline-block;vertical-align:-.15em}
+.deny{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.16);color:#eef0f5}
+.approve{color:#07141b;background:linear-gradient(120deg,var(--primA),var(--primB));
+  box-shadow:0 6px 18px -6px rgba(90,130,255,0.6),0 0 0 1px rgba(255,255,255,0.14) inset}
+.khint{margin-left:8px;display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--ink4)}
+
+/* voice hint bar */
+.vhint{display:inline-flex;align-items:center;gap:10px;font-size:12px;color:#8fdcc9;
+  background:rgba(52,214,172,0.08);border:1px solid rgba(52,214,172,0.24);border-radius:9px;padding:7px 12px}
+.vhint .mw{display:flex;align-items:center;gap:2px;height:13px}
+.vhint .mw i{display:block;width:2px;border-radius:1px;background:var(--teal);transform-origin:center;
+  animation:wv .85s ease-in-out infinite alternate}
+.vhint b{color:#d9f4eb;font-weight:600}
+.vhint .say{font-family:var(--font-mono);color:#d9f4eb}
+.vhint.locked{color:var(--ink3);background:rgba(255,255,255,0.03);border-color:var(--hair2)}
+.vhint.locked svg{width:13px;height:13px;color:var(--ink3);display:inline-block;vertical-align:-.12em}
+.vhint.locked .say{color:var(--ink4);text-decoration:line-through;text-decoration-color:rgba(255,255,255,.2)}
+
+.destrow{display:flex;align-items:center;gap:11px;margin-top:11px;background:#0d0e13;
+  border:1px solid rgba(242,128,122,0.24);border-radius:11px;padding:10px 13px;flex-wrap:wrap}
+.destrow .dc{display:inline-flex;align-items:center;gap:9px;font-family:var(--font-mono);font-size:13px;color:#e7e7ee}
+.destrow .dc .dg{color:#ff8a83}
+.destrow .dtag{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#f2b0ac;
+  background:rgba(242,128,122,0.12);border:1px solid rgba(242,128,122,0.3);border-radius:6px;padding:3px 8px}
+.destrow .dtag svg{width:13px;height:13px}
+.destrow .rt{margin-left:auto;display:flex;align-items:center;gap:9px}
+
+/* ---------- mode picker strip ---------- */
+.modestrip{display:flex;gap:16px;padding:20px;border-radius:16px;
+  background:linear-gradient(180deg,#191a21,#141419);border:1px solid var(--hair2);
+  box-shadow:0 20px 50px -30px rgba(0,0,0,.6)}
+.modecard{flex:1;position:relative;border-radius:14px;padding:17px 17px 16px;border:1px solid var(--hair2);
+  background:rgba(255,255,255,0.02);display:flex;flex-direction:column;gap:11px;min-height:150px}
+.modecard.sel{border-color:rgba(52,214,172,0.5);background:linear-gradient(180deg,rgba(52,214,172,0.06),rgba(123,120,255,0.03));
+  box-shadow:0 0 0 1px rgba(52,214,172,.28),0 16px 40px -26px rgba(52,214,172,.5)}
+.mc-top{display:flex;align-items:center;gap:11px}
+.mc-ico{width:38px;height:38px;border-radius:11px;flex:none;display:flex;align-items:center;justify-content:center;
+  color:var(--ink2);background:rgba(255,255,255,0.045);border:1px solid var(--hair2)}
+.mc-ico svg{width:20px;height:20px}
+.modecard.sel .mc-ico{color:#8beccf;background:rgba(52,214,172,0.12);border-color:rgba(52,214,172,0.34)}
+.mc-name{font-size:14px;font-weight:600;color:#eaeaf2;letter-spacing:.3px}
+.mc-name .k{font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:.6px;color:var(--ink3);
+  background:rgba(255,255,255,.05);border:1px solid var(--hair2);border-radius:5px;padding:2px 6px;margin-left:8px;vertical-align:1px;text-transform:uppercase}
+.modecard.sel .mc-name .k{color:#8fdcc9;background:rgba(52,214,172,.10);border-color:rgba(52,214,172,.26)}
+.mc-desc{font-size:12.5px;color:var(--ink2);line-height:1.5}
+.mc-desc b{color:#dcdde5;font-weight:600}
+.mc-flow{display:flex;align-items:center;gap:8px;margin-top:auto;font-size:11px;color:var(--ink3);font-family:var(--font-mono)}
+.mc-flow .node{display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,.04);border:1px solid var(--hair2);
+  border-radius:6px;padding:3px 7px}
+.mc-flow .node svg{width:12px;height:12px;opacity:.85}
+.mc-flow .a{width:15px;height:12px;color:var(--ink4);display:inline-flex}
+.mc-flow .a svg{width:15px;height:12px}
+.modecard.sel .mc-flow .node.owned{color:#8fdcc9;border-color:rgba(52,214,172,.28);background:rgba(52,214,172,.08)}
+.mc-check{position:absolute;top:14px;right:14px;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  color:#07141b;background:linear-gradient(120deg,var(--primA),var(--primB))}
+.mc-check svg{width:12px;height:12px}
+
+/* ---------- page footer ---------- */
+.gfoot{display:flex;align-items:center;gap:9px;margin-top:40px;padding-top:22px;
+  border-top:1px solid var(--hair2);font-size:12.5px;color:var(--ink3);flex-wrap:wrap}
+.gfoot .sq{width:8px;height:8px;border-radius:2px;background:linear-gradient(125deg,var(--primA),var(--primB))}
+.gfoot .wm{font-weight:600;color:#dbdbe4;letter-spacing:.2px}
+.gfoot .dv{opacity:.5}
+</style>
+</head>
+<body>
+
+<!-- inline icon sprite (no external refs) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="ic-claude" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 2.6v5M12 16.4v5M2.6 12h5M16.4 12h5M5.4 5.4l3 3M15.6 15.6l3 3M18.6 5.4l-3 3M8.4 15.6l-3 3"/></g></symbol>
+  <symbol id="ic-codex" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="12" cy="12" rx="3.6" ry="8.4"/><ellipse cx="12" cy="12" rx="3.6" ry="8.4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="3.6" ry="8.4" transform="rotate(120 12 12)"/></g></symbol>
+  <symbol id="ic-aider" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 10l3 2-3 2M13 14h4"/></g></symbol>
+  <symbol id="ic-mic" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/><path d="M8.5 21h7"/></g></symbol>
+  <symbol id="ic-branch" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="18" r="2"/><circle cx="7" cy="6" r="2"/><circle cx="17" cy="6" r="2"/><path d="M7 8v8"/><path d="M9 18h6a2 2 0 0 0 2-2V8"/></g></symbol>
+  <symbol id="ic-folder" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l2-2h4l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></g></symbol>
+  <symbol id="ic-term" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9l3 3l-3 3"/><path d="M13 15h4"/></g></symbol>
+  <symbol id="ic-file" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M10 13l-2 2 2 2"/><path d="M14 13l2 2-2 2"/></g></symbol>
+  <symbol id="ic-arrow" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></g></symbol>
+  <symbol id="ic-return" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 10l-4 4 4 4"/><path d="M5 14h11a4 4 0 0 0 4-4V6"/></g></symbol>
+  <symbol id="ic-x" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></g></symbol>
+  <symbol id="ic-check" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></g></symbol>
+  <symbol id="ic-lock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></g></symbol>
+  <symbol id="ic-warn" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5L21 19.5H3z"/><path d="M12 10v4"/><path d="M12 17h.01"/></g></symbol>
+  <symbol id="ic-rocket" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c3.5 1.6 5.5 5 5.5 9l-2 2.2H8.5L6.5 12c0-4 2-7.4 5.5-9z"/><circle cx="12" cy="9.5" r="1.7"/><path d="M8.5 16.2c-1.6.5-2.4 2-2.6 4 2-.2 3.5-1 4-2.6M15.5 16.2c1.6.5 2.4 2 2.6 4-2-.2-3.5-1-4-2.6"/></g></symbol>
+  <symbol id="ic-link" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 13l-4-4 4-4"/><path d="M10.5 8.5a4.5 4.5 0 0 1 0 9H8"/><path d="M15 11l4 4-4 4"/><path d="M13.5 15.5a4.5 4.5 0 0 1 0-9H16"/></g></symbol>
+  <symbol id="ic-diff" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v14M6 21v0"/><circle cx="6" cy="19" r="2"/><path d="M18 21V7M18 3v0"/><circle cx="18" cy="5" r="2"/><path d="M18 11a5 5 0 0 1-5 5H8"/></g></symbol>
+  <symbol id="ic-shield" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 2.5v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9v-5z"/><path d="M9 12l2 2 4-4"/></g></symbol>
+  <symbol id="ic-shieldbolt" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 2.5v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9v-5z"/><path d="M12.5 8.5L10 12.5h2.4L11.5 16"/></g></symbol>
+  <symbol id="ic-cpu" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 4v3M14 4v3M10 17v3M14 17v3M4 10h3M4 14h3M17 10h3M17 14h3"/></g></symbol>
+  <symbol id="ic-cursor-ibeam" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5h6M9 19h6M12 5v14"/></g></symbol>
+  <symbol id="ic-edit" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10-10-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></g></symbol>
+</svg>
+
+<div class="wrap">
+
+  <header class="ghead">
+    <div class="wm"><span class="sq"></span>notchide</div>
+    <div class="tag">steer your agents by voice, from the notch</div>
+    <div class="sheet">Voice drive · push-to-talk loop</div>
+  </header>
+  <div class="ghead-rule"></div>
+
+  <!-- loop ribbon -->
+  <div class="loop" aria-hidden="true">
+    <span class="step"><span class="n">1</span><b>Summon</b></span>
+    <span class="to"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+    <span class="step"><span class="n">2</span><b>Speak</b></span>
+    <span class="to"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+    <span class="step"><span class="n">3</span><b>Review</b></span>
+    <span class="to"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+    <span class="step"><span class="n">4</span><b>Observe</b></span>
+    <span class="to"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+    <span class="step"><span class="n">5</span><b>Decide</b></span>
+  </div>
+
+  <!-- ============ 01 ARMED ============ -->
+  <section class="card">
+    <div class="clabel"><span class="cnum">01</span><span class="ctitle">Armed · push-to-talk</span><span class="cline"></span></div>
+    <div class="screen">
+      <div class="ghost l" aria-hidden="true"><div class="bar"><span class="gd"></span><span class="gd"></span><span class="gd"></span><span class="gu"></span></div><div class="gb"></div></div>
+      <div class="ghost r" aria-hidden="true"><div class="bar"><span class="gd"></span><span class="gd"></span><span class="gd"></span><span class="gu"></span></div><div class="gb"></div></div>
+      <div class="menubar">
+        <div class="mb-l">
+          <svg class="mi" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 13.5c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.15-2.8.85-3.5.85-.7 0-1.85-.83-3-.8-1.55.02-2.98.9-3.77 2.29-1.6 2.79-.41 6.92 1.15 9.19.76 1.11 1.67 2.35 2.86 2.31 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.13 2.76-2.24.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.42-3.65z"/><path d="M14.9 6.5c.64-.78 1.07-1.86.95-2.94-.92.04-2.03.61-2.69 1.39-.59.69-1.11 1.79-.97 2.85 1.02.08 2.07-.52 2.71-1.3z"/></svg>
+          <span class="brand">Xcode</span><span>File</span><span>Edit</span><span>View</span>
+        </div>
+        <div class="mb-r">
+          <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="15" height="8" rx="2"/><path d="M19 10.5v3"/><rect x="4.3" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="7.6" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="10.9" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/></svg>
+          <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 18h.01"/><path d="M9.17 15.17a4 4 0 0 1 5.66 0"/><path d="M6.34 12.34a8 8 0 0 1 11.32 0"/><path d="M3.51 9.51c4.69-4.68 12.29-4.68 17 0"/></svg>
+          <span class="clock">9:41</span>
+        </div>
+      </div>
+      <svg class="notch plain" viewBox="0 0 420 74" aria-hidden="true">
+        <path d="M0,74 L0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44 L420,74 Z" fill="#1d1f27"/>
+        <path d="M0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44" fill="none" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+        <path d="M115,0 L305,0 L305,48 Q305,64 289,64 L131,64 Q115,64 115,48 Z" fill="#050608" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+      </svg>
+      <div class="cockpit" aria-hidden="true">
+        <div class="agent"><span class="pb sm claude"><svg><use href="#ic-claude"/></svg></span><span class="sdot teal"></span></div>
+        <span class="micpill"><svg viewBox="0 0 24 24"><use href="#ic-mic"/></svg></span>
+      </div>
+      <div class="ptt" aria-hidden="true">
+        <svg class="mg" viewBox="0 0 24 24"><use href="#ic-mic"/></svg>
+        hold <span class="kbd">⌃⌥</span> to talk
+        <span class="sep"></span>
+        <span style="color:var(--ink3)">or double-tap</span> <span class="kbd">Fn</span>
+      </div>
+      <div style="height:168px"></div>
+    </div>
+    <p class="caption"><b>Armed</b> — hold <span class="kbd">⌃⌥</span> and talk, without leaving your app. The pill stays collapsed; the target lane&rsquo;s dot keeps breathing so you know which session is listening.</p>
+  </section>
+
+  <!-- ============ 02 LISTENING ============ -->
+  <section class="card">
+    <div class="clabel"><span class="cnum">02</span><span class="ctitle">Listening · voice HUD</span><span class="cline"></span></div>
+    <div class="screen">
+      <div class="ghost l" aria-hidden="true"><div class="bar"><span class="gd"></span><span class="gd"></span><span class="gd"></span><span class="gu"></span></div><div class="gb"></div></div>
+      <div class="menubar">
+        <div class="mb-l">
+          <svg class="mi" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 13.5c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.15-2.8.85-3.5.85-.7 0-1.85-.83-3-.8-1.55.02-2.98.9-3.77 2.29-1.6 2.79-.41 6.92 1.15 9.19.76 1.11 1.67 2.35 2.86 2.31 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.13 2.76-2.24.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.42-3.65z"/><path d="M14.9 6.5c.64-.78 1.07-1.86.95-2.94-.92.04-2.03.61-2.69 1.39-.59.69-1.11 1.79-.97 2.85 1.02.08 2.07-.52 2.71-1.3z"/></svg>
+          <span class="brand">Xcode</span><span>File</span><span>Edit</span><span>View</span>
+        </div>
+        <div class="mb-r">
+          <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="15" height="8" rx="2"/><path d="M19 10.5v3"/><rect x="4.3" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="7.6" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="10.9" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/></svg>
+          <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 18h.01"/><path d="M9.17 15.17a4 4 0 0 1 5.66 0"/><path d="M6.34 12.34a8 8 0 0 1 11.32 0"/><path d="M3.51 9.51c4.69-4.68 12.29-4.68 17 0"/></svg>
+          <span class="clock">9:41</span>
+        </div>
+      </div>
+      <svg class="notch teal" viewBox="0 0 420 74" aria-hidden="true">
+        <path d="M0,74 L0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44 L420,74 Z" fill="#1d1f27"/>
+        <path d="M0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44" fill="none" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+        <path d="M115,0 L305,0 L305,48 Q305,64 289,64 L131,64 Q115,64 115,48 Z" fill="#050608" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+      </svg>
+      <div class="nglow teal" aria-hidden="true"></div>
+
+      <div class="panelwrap hud"><div class="panel voice">
+        <div class="hudtop">
+          <span class="orb rec" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ic-mic"/></svg></span>
+          <span class="hudtitle">
+            <span class="t1">Listening <span class="ondev"><svg viewBox="0 0 24 24"><use href="#ic-cpu"/></svg>on-device</span></span>
+            <span class="t2">streaming transcript — nothing leaves your Mac</span>
+          </span>
+          <span class="escaff" style="margin-left:auto"><span class="kbd">Esc</span> to cancel</span>
+        </div>
+
+        <div class="wave" aria-hidden="true">
+          <i style="height:8px;animation-delay:-.02s"></i><i style="height:13px;animation-delay:-.10s"></i><i style="height:19px;animation-delay:-.18s"></i><i style="height:11px;animation-delay:-.26s"></i><i style="height:25px;animation-delay:-.34s"></i><i style="height:16px;animation-delay:-.42s"></i><i style="height:31px;animation-delay:-.50s"></i><i style="height:22px;animation-delay:-.58s"></i><i style="height:35px;animation-delay:-.66s"></i><i style="height:20px;animation-delay:-.74s"></i><i style="height:28px;animation-delay:-.82s"></i><i style="height:15px;animation-delay:-.90s"></i><i style="height:26px;animation-delay:-.06s"></i><i style="height:36px;animation-delay:-.14s"></i><i style="height:24px;animation-delay:-.22s"></i><i style="height:32px;animation-delay:-.30s"></i><i style="height:18px;animation-delay:-.38s"></i><i style="height:28px;animation-delay:-.46s"></i><i style="height:14px;animation-delay:-.54s"></i><i style="height:23px;animation-delay:-.62s"></i><i style="height:10px;animation-delay:-.70s"></i><i style="height:27px;animation-delay:-.78s"></i><i style="height:16px;animation-delay:-.86s"></i><i style="height:30px;animation-delay:-.94s"></i><i style="height:12px;animation-delay:-.04s"></i><i style="height:20px;animation-delay:-.12s"></i><i style="height:8px;animation-delay:-.20s"></i><i style="height:15px;animation-delay:-.28s"></i><i style="height:9px;animation-delay:-.36s"></i><i style="height:6px;animation-delay:-.44s"></i>
+        </div>
+
+        <div class="transcript partial"><span class="lead-w">add rate limiting to the</span> payments endpo<span class="tcaret"></span></div>
+
+        <div class="hudfoot">
+          <span class="tchip">
+            <span class="arw"><svg viewBox="0 0 24 24"><use href="#ic-arrow"/></svg></span>
+            <span class="seg"><span class="pb sm claude"><svg><use href="#ic-claude"/></svg></span>agent #2</span>
+            <span class="sep"></span>
+            <span class="seg"><svg viewBox="0 0 24 24"><use href="#ic-branch"/></svg><span class="mono">feat/payments</span></span>
+            <span class="sep"></span>
+            <span class="seg"><svg viewBox="0 0 24 24"><use href="#ic-folder"/></svg><span class="mono">~/proj</span></span>
+          </span>
+          <span class="count">
+            <span class="lbl">silence · auto-send</span>
+            <span class="meter deplete"><i></i></span>
+          </span>
+        </div>
+      </div></div>
+    </div>
+    <p class="caption"><b>Listening</b> — on-device, streaming. Routes to the session, not your cursor. The waveform is live, the partial transcript stays dimmed until it settles, and a brief silence auto-sends.</p>
+  </section>
+
+  <!-- ============ 03 FINALIZING / REVIEW ============ -->
+  <section class="card">
+    <div class="clabel"><span class="cnum">03</span><span class="ctitle">Review · intent before send</span><span class="cline"></span></div>
+    <div class="screen">
+      <div class="ghost l" aria-hidden="true"><div class="bar"><span class="gd"></span><span class="gd"></span><span class="gd"></span><span class="gu"></span></div><div class="gb"></div></div>
+      <div class="menubar">
+        <div class="mb-l">
+          <svg class="mi" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 13.5c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.15-2.8.85-3.5.85-.7 0-1.85-.83-3-.8-1.55.02-2.98.9-3.77 2.29-1.6 2.79-.41 6.92 1.15 9.19.76 1.11 1.67 2.35 2.86 2.31 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.13 2.76-2.24.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.42-3.65z"/><path d="M14.9 6.5c.64-.78 1.07-1.86.95-2.94-.92.04-2.03.61-2.69 1.39-.59.69-1.11 1.79-.97 2.85 1.02.08 2.07-.52 2.71-1.3z"/></svg>
+          <span class="brand">Xcode</span><span>File</span><span>Edit</span><span>View</span>
+        </div>
+        <div class="mb-r">
+          <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="15" height="8" rx="2"/><path d="M19 10.5v3"/><rect x="4.3" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="7.6" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="10.9" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/></svg>
+          <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 18h.01"/><path d="M9.17 15.17a4 4 0 0 1 5.66 0"/><path d="M6.34 12.34a8 8 0 0 1 11.32 0"/><path d="M3.51 9.51c4.69-4.68 12.29-4.68 17 0"/></svg>
+          <span class="clock">9:41</span>
+        </div>
+      </div>
+      <svg class="notch teal" viewBox="0 0 420 74" aria-hidden="true">
+        <path d="M0,74 L0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44 L420,74 Z" fill="#1d1f27"/>
+        <path d="M0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44" fill="none" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+        <path d="M115,0 L305,0 L305,48 Q305,64 289,64 L131,64 Q115,64 115,48 Z" fill="#050608" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+      </svg>
+      <div class="nglow teal" aria-hidden="true"></div>
+
+      <div class="panelwrap hud"><div class="panel voice">
+        <div class="hudtop">
+          <span class="orb" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ic-check"/></svg></span>
+          <span class="hudtitle">
+            <span class="t1">Ready to send <span class="edit-affix"><svg viewBox="0 0 24 24"><use href="#ic-edit"/></svg>editable</span></span>
+            <span class="t2">this is an instruction to the agent — not keystrokes</span>
+          </span>
+          <span class="escaff" style="margin-left:auto"><span class="kbd">Esc</span> to edit</span>
+        </div>
+
+        <div class="transcript final">Add rate limiting to the payments endpoint — token bucket, keyed by customer ID.<span class="tcaret"></span></div>
+
+        <div class="hudfoot">
+          <span class="tchip">
+            <span class="arw"><svg viewBox="0 0 24 24"><use href="#ic-arrow"/></svg></span>
+            <span class="seg"><span class="pb sm claude"><svg><use href="#ic-claude"/></svg></span>agent #2</span>
+            <span class="sep"></span>
+            <span class="seg"><svg viewBox="0 0 24 24"><use href="#ic-branch"/></svg><span class="mono">feat/payments</span></span>
+            <span class="sep"></span>
+            <span class="seg"><svg viewBox="0 0 24 24"><use href="#ic-folder"/></svg><span class="mono">~/proj</span></span>
+          </span>
+        </div>
+
+        <div class="grace">
+          <div class="gracebar"><i></i></div>
+          <div class="graceline">
+            <span class="g"><b>Sending in 2s</b></span>
+            <span class="gsep"></span>
+            <span class="g"><span class="kbd">Return</span> to send now</span>
+            <span class="gsep"></span>
+            <span class="g"><span class="kbd">Esc</span> to edit</span>
+            <span class="send"><svg viewBox="0 0 24 24"><use href="#ic-return"/></svg>send now</span>
+          </div>
+        </div>
+      </div></div>
+    </div>
+    <p class="caption"><b>Review before send</b> — the transcript solidifies to full-opacity, editable text with a short grace window. It&rsquo;s an intent to the agent, not keystrokes into your editor.</p>
+  </section>
+
+  <!-- ============ 04 SENT / IN-FLIGHT ============ -->
+  <section class="card">
+    <div class="clabel"><span class="cnum">04</span><span class="ctitle">In-flight · you keep working</span><span class="cline"></span></div>
+    <div class="screen">
+      <div class="ghost doc" aria-hidden="true"><div class="bar"><span class="gd"></span><span class="gd"></span><span class="gd"></span><span class="gu"></span></div><div class="gb"></div></div>
+      <div class="menubar">
+        <div class="mb-l">
+          <svg class="mi" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 13.5c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.15-2.8.85-3.5.85-.7 0-1.85-.83-3-.8-1.55.02-2.98.9-3.77 2.29-1.6 2.79-.41 6.92 1.15 9.19.76 1.11 1.67 2.35 2.86 2.31 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.13 2.76-2.24.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.42-3.65z"/><path d="M14.9 6.5c.64-.78 1.07-1.86.95-2.94-.92.04-2.03.61-2.69 1.39-.59.69-1.11 1.79-.97 2.85 1.02.08 2.07-.52 2.71-1.3z"/></svg>
+          <span class="brand">Xcode</span><span>File</span><span>Edit</span><span>View</span>
+        </div>
+        <div class="mb-r">
+          <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="15" height="8" rx="2"/><path d="M19 10.5v3"/><rect x="4.3" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="7.6" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="10.9" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/></svg>
+          <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 18h.01"/><path d="M9.17 15.17a4 4 0 0 1 5.66 0"/><path d="M6.34 12.34a8 8 0 0 1 11.32 0"/><path d="M3.51 9.51c4.69-4.68 12.29-4.68 17 0"/></svg>
+          <span class="clock">9:41</span>
+        </div>
+      </div>
+      <svg class="notch" viewBox="0 0 420 74" aria-hidden="true">
+        <path d="M0,74 L0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44 L420,74 Z" fill="#1d1f27"/>
+        <path d="M0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44" fill="none" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+        <path d="M115,0 L305,0 L305,48 Q305,64 289,64 L131,64 Q115,64 115,48 Z" fill="#050608" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+      </svg>
+      <div class="nglow teal" aria-hidden="true"></div>
+      <div class="cockpit" aria-hidden="true">
+        <div class="agent"><span class="pb sm claude"><svg><use href="#ic-claude"/></svg></span><span class="sdot teal"></span></div>
+      </div>
+
+      <div class="panelwrap"><div class="panel">
+        <div class="row">
+          <span class="lead watch"><svg class="li" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/></svg>working · in-flight</span>
+          <span class="chips">
+            <span class="chip prov"><span class="pb sm claude"><svg><use href="#ic-claude"/></svg></span>agent #2</span>
+            <span class="chip"><svg class="ci" viewBox="0 0 24 24"><use href="#ic-branch"/></svg>feat/payments</span>
+            <span class="chip mono"><svg class="ci" viewBox="0 0 24 24"><use href="#ic-folder"/></svg>~/proj</span>
+          </span>
+        </div>
+
+        <div style="margin:14px 0 4px">
+          <span class="sentchip">
+            <span class="ck"><svg viewBox="0 0 24 24"><use href="#ic-check"/></svg></span>
+            <b>sent to agent #2</b>
+            <span class="q">“add rate limiting to the payments endpoint”</span>
+          </span>
+        </div>
+
+        <div class="sech"><svg viewBox="0 0 24 24"><use href="#ic-claude"/></svg>agent<span class="live"><span class="bd"></span>streaming</span></div>
+        <div class="stream">
+          <p class="p">On it. I&rsquo;ll add a token-bucket limiter to <code>POST /payments</code>, keyed by customer ID, returning <code>429 · Retry-After</code> on overflow — then wire it into <code>charge(_:to:)</code> before the gateway call and cover it with a test.<span class="tcaret"></span></p>
+        </div>
+
+        <div class="divln"></div>
+
+        <div class="sech"><svg viewBox="0 0 24 24"><use href="#ic-diff"/></svg>changes so far</div>
+        <div class="files">
+          <span class="file active"><svg viewBox="0 0 24 24"><use href="#ic-file"/></svg>PaymentService.swift · <span class="pl">+18</span> <span class="mn">−4</span></span>
+          <span class="file"><svg viewBox="0 0 24 24"><use href="#ic-file"/></svg>RateLimiter.swift · <span class="pl">+31</span> <span class="mn">−0</span></span>
+        </div>
+        <div class="diff">
+          <div class="hunk">@@ -12,7 +12,9 @@ PaymentService · charge(_:to:)</div>
+          <div class="drow"><span class="ln">12</span><span class="sg"> </span><code class="cc"><span class="k">func</span> <span class="f">charge</span>(_ amount: <span class="t">Decimal</span>, to card: <span class="t">Card</span>) <span class="k">async</span> <span class="k">throws</span> -&gt; <span class="t">Receipt</span> {</code></div>
+          <div class="drow"><span class="ln">13</span><span class="sg"> </span><code class="cc">    <span class="k">guard</span> amount &gt; 0 <span class="k">else</span> { <span class="k">throw</span> <span class="t">PaymentError</span>.invalidAmount }</code></div>
+          <div class="drow add"><span class="ln">14</span><span class="sg">+</span><code class="cc">    <span class="k">try</span> <span class="k">await</span> rateLimiter.<span class="f">acquire</span>(for: card.customerID)</code></div>
+          <div class="drow"><span class="ln">15</span><span class="sg"> </span><code class="cc">    <span class="k">let</span> intent = <span class="k">try</span> <span class="k">await</span> gateway.<span class="f">createIntent</span>(cents, key: key)</code></div>
+          <div class="drow rem"><span class="ln">16</span><span class="sg">−</span><code class="cc">    <span class="k">return</span> intent</code></div>
+          <div class="drow add"><span class="ln">16</span><span class="sg">+</span><code class="cc">    <span class="k">return</span> <span class="k">try</span> <span class="k">await</span> gateway.<span class="f">confirm</span>(intent)</code></div>
+        </div>
+      </div></div>
+    </div>
+    <p class="caption"><b>You keep working</b> — the transcript collapses to a <i>sent</i> chip and progress streams into the notch: assistant tokens first, then a rolling diff. Your cursor never left the doc behind it.</p>
+  </section>
+
+  <!-- ============ 05 AWAITING APPROVAL (VOICE) ============ -->
+  <section class="card">
+    <div class="clabel"><span class="cnum">05</span><span class="ctitle">Approve by voice · GATE</span><span class="cline"></span></div>
+    <div class="screen">
+      <div class="menubar">
+        <div class="mb-l">
+          <svg class="mi" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 13.5c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.15-2.8.85-3.5.85-.7 0-1.85-.83-3-.8-1.55.02-2.98.9-3.77 2.29-1.6 2.79-.41 6.92 1.15 9.19.76 1.11 1.67 2.35 2.86 2.31 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.13 2.76-2.24.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.42-3.65z"/><path d="M14.9 6.5c.64-.78 1.07-1.86.95-2.94-.92.04-2.03.61-2.69 1.39-.59.69-1.11 1.79-.97 2.85 1.02.08 2.07-.52 2.71-1.3z"/></svg>
+          <span class="brand">Xcode</span><span>File</span><span>Edit</span><span>View</span>
+        </div>
+        <div class="mb-r">
+          <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="15" height="8" rx="2"/><path d="M19 10.5v3"/><rect x="4.3" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="7.6" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/><rect x="10.9" y="10.2" width="2" height="3.6" rx="0.5" fill="currentColor" stroke="none"/></svg>
+          <svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 18h.01"/><path d="M9.17 15.17a4 4 0 0 1 5.66 0"/><path d="M6.34 12.34a8 8 0 0 1 11.32 0"/><path d="M3.51 9.51c4.69-4.68 12.29-4.68 17 0"/></svg>
+          <span class="clock">9:41</span>
+        </div>
+      </div>
+      <svg class="notch" viewBox="0 0 420 74" aria-hidden="true">
+        <path d="M0,74 L0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44 L420,74 Z" fill="#1d1f27"/>
+        <path d="M0,44 L95,44 C108,44 115,51 115,64 L305,64 C305,51 312,44 325,44 L420,44" fill="none" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+        <path d="M115,0 L305,0 L305,48 Q305,64 289,64 L131,64 Q115,64 115,48 Z" fill="#050608" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+      </svg>
+      <div class="nglow" aria-hidden="true"></div>
+      <div class="cockpit" aria-hidden="true">
+        <div class="agent"><span class="pb sm claude"><svg><use href="#ic-claude"/></svg></span><span class="sdot amber"></span></div>
+      </div>
+
+      <div class="panelwrap"><div class="panel">
+        <div class="row">
+          <span class="lead needs"><svg class="li" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 2.5v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9v-5z"/><circle cx="12" cy="11" r="1.4"/><path d="M12 12.4v2.2"/></svg>permission requested</span>
+          <span class="chips">
+            <span class="chip prov"><span class="pb sm claude"><svg><use href="#ic-claude"/></svg></span>agent #2</span>
+            <span class="chip"><svg class="ci" viewBox="0 0 24 24"><use href="#ic-branch"/></svg>feat/payments</span>
+            <span class="chip mono"><svg class="ci" viewBox="0 0 24 24"><use href="#ic-term"/></svg>Bash</span>
+          </span>
+        </div>
+
+        <div class="cmdlabel">wants to run</div>
+        <div class="cmd warn">
+          <span class="pr">$</span>
+          <span class="t">git push origin feat/payments</span>
+          <span class="tag amber"><svg viewBox="0 0 24 24"><use href="#ic-warn"/></svg>pushes 3 commits</span>
+        </div>
+
+        <div class="actions">
+          <button class="btn deny"><svg viewBox="0 0 24 24"><use href="#ic-x"/></svg>Deny</button>
+          <button class="btn approve"><svg viewBox="0 0 24 24"><use href="#ic-check"/></svg>Approve</button>
+          <span class="vhint">
+            <span class="mw" aria-hidden="true"><i style="height:5px;animation-delay:-.1s"></i><i style="height:10px;animation-delay:-.3s"></i><i style="height:7px;animation-delay:-.5s"></i><i style="height:12px;animation-delay:-.2s"></i><i style="height:6px;animation-delay:-.4s"></i></span>
+            say <span class="say">&ldquo;approve&rdquo;</span> or <span class="say">&ldquo;deny&rdquo;</span>
+          </span>
+          <span class="khint">or <span class="kbd">⌘⏎</span></span>
+        </div>
+
+        <div class="divln"></div>
+
+        <div class="sech"><svg viewBox="0 0 24 24"><use href="#ic-diff"/></svg>staged change</div>
+        <div class="diff">
+          <div class="hunk">@@ -12,7 +12,9 @@ PaymentService · charge(_:to:)</div>
+          <div class="drow"><span class="ln">13</span><span class="sg"> </span><code class="cc">    <span class="k">guard</span> amount &gt; 0 <span class="k">else</span> { <span class="k">throw</span> <span class="t">PaymentError</span>.invalidAmount }</code></div>
+          <div class="drow add"><span class="ln">14</span><span class="sg">+</span><code class="cc">    <span class="k">try</span> <span class="k">await</span> rateLimiter.<span class="f">acquire</span>(for: card.customerID)</code></div>
+          <div class="drow"><span class="ln">15</span><span class="sg"> </span><code class="cc">    <span class="k">let</span> intent = <span class="k">try</span> <span class="k">await</span> gateway.<span class="f">createIntent</span>(cents, key: key)</code></div>
+          <div class="drow rem"><span class="ln">16</span><span class="sg">−</span><code class="cc">    <span class="k">return</span> intent</code></div>
+          <div class="drow add"><span class="ln">16</span><span class="sg">+</span><code class="cc">    <span class="k">return</span> <span class="k">try</span> <span class="k">await</span> gateway.<span class="f">confirm</span>(intent)</code></div>
+        </div>
+
+        <div class="destrow">
+          <span class="dc"><span style="color:var(--ink4)">$</span> <span class="dg">rm -rf</span> build/</span>
+          <span class="dtag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-warn"/></svg>destructive · click/hotkey required</span>
+          <span class="rt">
+            <span class="vhint locked"><svg viewBox="0 0 24 24"><use href="#ic-lock"/></svg>voice <span class="say">&ldquo;approve&rdquo;</span> disabled</span>
+          </span>
+        </div>
+      </div></div>
+    </div>
+    <p class="caption"><b>Approve by voice</b> — a one-word &ldquo;approve&rdquo; or &ldquo;deny&rdquo; clears the gate for ordinary commands. Destructive ones (an <span class="kbd">rm -rf</span>) never accept a spoken yes — they demand a deliberate click or hotkey.</p>
+  </section>
+
+  <!-- ============ 06 MODE PICKER ============ -->
+  <section class="card">
+    <div class="clabel"><span class="cnum">06</span><span class="ctitle">Host or attach</span><span class="cline"></span></div>
+    <div class="modestrip">
+      <div class="modecard sel">
+        <span class="mc-check" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ic-check"/></svg></span>
+        <div class="mc-top">
+          <span class="mc-ico"><svg viewBox="0 0 24 24"><use href="#ic-rocket"/></svg></span>
+          <span class="mc-name">Host <span class="k">owns it</span></span>
+        </div>
+        <div class="mc-desc"><b>notchide launches &amp; owns the agent</b> — no terminal tab at all. Summon, speak, and it spins the session up for you.</div>
+        <div class="mc-flow" aria-hidden="true">
+          <span class="node"><svg viewBox="0 0 24 24"><use href="#ic-mic"/></svg>notch</span>
+          <span class="a"><svg viewBox="0 0 24 24"><use href="#ic-arrow"/></svg></span>
+          <span class="node owned"><svg viewBox="0 0 24 24"><use href="#ic-claude"/></svg>agent</span>
+        </div>
+      </div>
+      <div class="modecard">
+        <div class="mc-top">
+          <span class="mc-ico"><svg viewBox="0 0 24 24"><use href="#ic-link"/></svg></span>
+          <span class="mc-name">Attach <span class="k">steer it</span></span>
+        </div>
+        <div class="mc-desc"><b>Steer a session you already started</b> — attach to a running agent in your own terminal and drive it by voice from the notch.</div>
+        <div class="mc-flow" aria-hidden="true">
+          <span class="node"><svg viewBox="0 0 24 24"><use href="#ic-term"/></svg>your tab</span>
+          <span class="a"><svg viewBox="0 0 24 24"><use href="#ic-link"/></svg></span>
+          <span class="node"><svg viewBox="0 0 24 24"><use href="#ic-mic"/></svg>notch</span>
+        </div>
+      </div>
+    </div>
+    <p class="caption"><b>Host it, or attach to a running session.</b> Either way the voice loop is identical — the only question is who owns the process.</p>
+  </section>
+
+  <div class="gfoot">
+    <span class="sq"></span><span class="wm">notchide</span>
+    <span class="dv">·</span><span>steer your agents by voice, from the notch</span>
+    <span class="dv">·</span><span>voice drive · push-to-talk loop</span>
+  </div>
+
+</div>
+</body></html>

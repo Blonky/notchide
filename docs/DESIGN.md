@@ -34,8 +34,10 @@ notchide is **one object in two states**:
 - **Expanded** = a read-only review console that drops down out of the notch for the single
   most-urgent session.
 
-It does exactly two verbs — **NOTIFY** and **DECIDE** — and deliberately never the third,
-**CREATE**.
+It does three verbs — **NOTIFY**, **DECIDE**, and — hands-free — **STEER** by voice — and
+deliberately never the one that would make it an IDE, **CREATE**. STEER routes a *spoken
+instruction* to a running session (§12); it never types code for you. The principle is
+**NOTIFY + DECIDE + STEER, never CREATE.**
 
 ### 1.1 An open platform, not a single-agent tool
 
@@ -233,7 +235,7 @@ The decision maps directly onto Claude Code's `PreToolUse` output schema:
 - **Redirect** → `deny` + the one-line redirect surfaced back to the agent as the reason /
   additional context, so the agent gets a concrete steer instead of a bare refusal.
 - **Approve-and-remember** → `allow` now, and the exact command string is cached so future
-  identical calls auto-resolve (see §12).
+  identical calls auto-resolve (see §13).
 
 ```jsonc
 // notchide-hook stdout on Approve — Claude Code proceeds:
@@ -338,7 +340,7 @@ These are first-class product commitments, tested and defended, not nice-to-have
 - **Per-session + global mute** — plus a one-line "why did this tap?" on every escalation.
 - **Conservative write path** — the full command is always shown, an explicit click is always
   required, ambiguity **defaults to Deny**, and notchide **never auto-approves** (except the
-  explicit, per-exact-command Approve-and-remember, §12).
+  explicit, per-exact-command Approve-and-remember, §13).
 - **Fail-open hook** — an unavailable notchide never bricks an agent (§6.2).
 - **First-class floating-pill fallback** — non-notch Macs and external displays are not
   second-class.
@@ -374,7 +376,7 @@ floating pill / a normal always-on-top panel) rather than crashing.
 | ------------------------------------------------------------------------------------ | ---------- |
 | **Annoyance is the product-killer.** An over-eager notch trains users to ignore or uninstall it. | Smart suppression is the core bet (§7): silence by default, never tap about a visible session, mute, and a legible "why did this tap?". If notchide is annoying, it has failed regardless of features. |
 | **Synchronous-hook coupling.** Blocking `PreToolUse` on notchide could hang the agent. | **Fail-open** (§6.2): hard timeout, exit `0`, defer to Claude Code's normal prompt. notchide is never load-bearing. |
-| **Security-sensitive write path.** Approving a command the user didn't fully read is dangerous. | Conservative write path (§9): full command always shown, explicit click required, **default-to-Deny** on ambiguity, **never auto-approve** except explicit per-exact-command remembering (§12). |
+| **Security-sensitive write path.** Approving a command the user didn't fully read is dangerous. | Conservative write path (§9): full command always shown, explicit click required, **default-to-Deny** on ambiguity, **never auto-approve** except explicit per-exact-command remembering (§13). |
 | **Private-framework fragility.** SkyLight / `CGSSpace` are undocumented and can change across macOS releases. | Feature-detect at runtime and **degrade** (floating pill / plain always-on-top) rather than crash; prove notarization at t=0 (§10); harden feature-detection across point releases by v1.0. |
 | **Single-vendor coupling.** v0.1 *ships* Claude-Code-only. | The core is already agent-agnostic: it is built around **AAP** ([PROTOCOL.md](PROTOCOL.md)) and a generic `AgentEvent`/`AgentProvider` model, with Claude Code as the reference adapter. v0.2 adds a passive OTLP listener (a second built-in provider, notify-only) proving the abstraction; v1.0 freezes `aap/1` and publishes the adapter SDK + community adapters. |
 | **Scope gravity toward an editor.** "Just let me edit the diff" is a constant pull. | The **NOTIFY + DECIDE, never CREATE** rule is a hard product boundary (§3). Read-only is the whole point: it keeps notchide small, safe, and shippable. Editing is reconsidered no earlier than v0.3 and only against a genuinely stable editor component. |
@@ -383,7 +385,112 @@ floating pill / a normal always-on-top panel) rather than crashing.
 
 ---
 
-## 12. Open decisions & locked defaults
+## 12. Voice-drive: steer by voice
+
+The read-only console (§4.2) closes the **decision** loop. Voice-drive closes the
+**direction** loop: it lets you **steer a running agent by talking to it**, hands-free —
+without cmd-tabbing to its terminal or typing a word. This is the platform's third verb,
+**STEER**, and it is deliberately narrow. The full interaction mockup is
+[`docs/media/voice.html`](media/voice.html).
+
+### 12.1 The principle — route an intent, never keystrokes
+
+STEER-by-voice **routes an intent to a session**. When you speak, notchide commits the
+final transcript to a single `VoiceIntent` and hands it to the agent as an
+`AgentAction.prompt(SessionKey, String)` — a *fresh natural-language instruction* to that
+session. It is emphatically:
+
+- **not keystrokes** — notchide never synthesizes keypresses into the focused editor or
+  terminal. The intent travels the AAP wire as an actuate `prompt`
+  ([PROTOCOL.md §7](PROTOCOL.md#7-the-actuate-frame)), not through the keyboard.
+- **not authoring** — a spoken instruction is a *prompt to the agent*, which then does the
+  work under its own permissions. notchide still never **CREATE**s code itself; STEER is
+  NOTIFY + DECIDE's peer, not a smuggled-in editor.
+
+The pure state machine that produces the intent — `VoiceController` — contains no audio and
+no AppKit: it consumes `Transcript`s and emits a `VoiceIntent`; *delivering* that intent is
+the app's job. That keeps the whole voice pipeline headless-testable on an injectable clock
+(the silence cap, the total cap, and the review-grace window all advance deterministically —
+no microphone, no wall clock).
+
+### 12.2 The route-by-session inversion
+
+Typing is *focus-bound*: characters go to whatever window holds the keyboard. That is exactly
+the model notchide exists to escape — a window steals focus (§2). Voice-drive **inverts** it:
+an utterance is bound to a **target session**, not to the frontmost app. You summon the session
+you mean — the most-urgent one, or one you pick — and your words are routed to *that* agent's
+`SessionKey`, wherever its terminal is (another Space, hidden, fullscreen behind you). The app
+you are looking at is never focused and never receives a keystroke. **Route-by-session, not
+route-by-focus**, is what makes hands-free steering compatible with the "never steal focus"
+thesis.
+
+### 12.3 HOST vs ATTACH
+
+A session can be steered two ways, and the console shows which:
+
+- **HOST (first-class).** A **host adapter owns a live, streaming agent session** and
+  advertises `actuate` on its AAP handshake. The prompt is **pushed** to it as an
+  `ActuateFrame` over the kept-alive duplex connection
+  ([PROTOCOL.md §7](PROTOCOL.md#7-the-actuate-frame)), and that same connection streams the
+  session's progress and gates back. The reference host is the **Node Agent-SDK sidecar**
+  (`sh.claude.host`), which keeps a Claude session open and injects the prompt directly. This
+  is the clean path: structured, bidirectional, observable.
+- **ATTACH (degraded).** Where no host owns the session — a plain agent already running in a
+  terminal — notchide can **attach** to it (via `cmux`/`tmux`) and inject the instruction into
+  the running session. This is best-effort: there is no structured event stream back, so the
+  loop degrades to whatever the terminal exposes. ATTACH is the fallback for sessions that
+  predate or lack a host adapter.
+
+If neither a live host connection nor an attachable session exists for the target, the prompt
+is a **safe no-op** — the same fail-safe the wire guarantees
+([PROTOCOL.md §7.2](PROTOCOL.md#72-routing--the-missing-target-no-op-normative)): steering a
+session that isn't live simply does nothing.
+
+### 12.4 The loop — summon → speak → prompt → observe → decide
+
+1. **Summon.** A global hotkey (the same summon affordance as §4.2) brings up the target
+   session — the most-urgent one, or one you select — without leaving your app.
+2. **Speak.** Hold push-to-talk and talk. The live (volatile) transcript surfaces in the HUD
+   for feedback; only a **final** transcript is ever committed. Release drops into a short,
+   **editable** review-grace window before the intent auto-sends — or send at once, or cancel.
+3. **Prompt.** The committed `VoiceIntent` is routed to the session as an `AgentAction.prompt`
+   — a HOST push or an ATTACH inject (§12.3).
+4. **Observe.** The agent runs. Its progress streams back into the same lane/glyph model as
+   every other session (§4.1) — you *watch* it work, ambiently.
+5. **Decide.** If the agent hits a permission gate, it escalates to `needs-you` and you
+   **decide in the console** exactly as always (§4.2). Voice got the work started; the gate is
+   still a deliberate human decision (§12.6).
+
+### 12.5 On-device voice — local-first, no cloud
+
+Speech recognition is **on-device**, matching the platform's local-first stance (§1.1): no
+utterance leaves the machine.
+
+- **Primary — SpeechAnalyzer.** The modern on-device recognizer, used where the OS provides
+  it. It produces the volatile/final `Transcript` stream the `VoiceController` consumes.
+- **Fallback — WhisperKit.** A bundled on-device model for machines/OS versions where
+  SpeechAnalyzer is unavailable, so voice-drive still works fully offline.
+
+The core ships only the `VoiceProvider` protocol (plus a scripted `StubVoiceProvider` for
+tests); the mic-bound SpeechAnalyzer/WhisperKit implementations live in the app target, so the
+pipeline stays dependency-free and testable.
+
+### 12.6 Destructive gates are never voice-approved (the safety rule)
+
+The single hard rule: **voice can start work, but voice can never approve a destructive
+action.** Voice reaches a session only through `actuate` (`prompt` / `interrupt`) and **never**
+through `gate` — they are orthogonal write paths
+([PROTOCOL.md §7.3](PROTOCOL.md#73-voice-reaches-actuate-never-gate)). So a spoken instruction
+that leads the agent toward, say, `rm -rf` still stops at that command's normal permission
+gate, which escalates to `needs-you` and requires the deliberate, conservative **click** of
+§4.2 — full command shown, default-to-Deny on ambiguity, never auto-approved. There is no
+"yes"-word that one-shot-approves a dangerous command. STEER therefore lives inside the same
+conservative write path as DECIDE (§9): easy to *start* an agent by voice, impossible to
+*approve danger* by voice.
+
+---
+
+## 13. Open decisions & locked defaults
 
 Decisions that are **locked** for v0.1 (revisit only with cause):
 
