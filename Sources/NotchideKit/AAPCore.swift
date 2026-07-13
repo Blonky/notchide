@@ -49,7 +49,7 @@ public struct SessionKey: Hashable, Sendable, Codable {
 ///
 /// - `observe`: report status/progress (read-only).
 /// - `gate`: block the agent awaiting a permission decision.
-/// - `actuate`: accept actions back (resume/answer).
+/// - `actuate`: receive app-pushed `prompt` / `interrupt` frames to drive its agent.
 public enum Capability: String, Sendable, Codable, CaseIterable {
     case observe
     case gate
