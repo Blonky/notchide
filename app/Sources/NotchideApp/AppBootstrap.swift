@@ -2,6 +2,7 @@ import AppKit
 import Darwin
 import Foundation
 import NotchideKit
+import SwiftUI
 
 /// The application delegate — the one place everything is wired together.
 ///
@@ -44,6 +45,14 @@ public final class NotchideAppDelegate: NSObject, NSApplicationDelegate {
     private var otlpProvider: OTLPProvider?
     private var lanesTask: Task<Void, Never>?
     private var eventsTask: Task<Void, Never>?
+
+    // Status-menu presence. An accessory app has no Dock icon, so this menu-bar
+    // item is the app's only affordance for opening Preferences, toggling mute,
+    // and quitting. The Preferences window + its hosting controller are retained
+    // here so a SwiftUI settings surface isn't deallocated the moment it opens.
+    private var statusItem: NSStatusItem?
+    private var muteMenuItem: NSMenuItem?
+    private var preferencesWindow: NSWindow?
 
     public override init() { super.init() }
 
@@ -100,6 +109,7 @@ public final class NotchideAppDelegate: NSObject, NSApplicationDelegate {
         self.controller = controller
         controller.start()
 
+        setupStatusItem()
         observeLanes(into: controller)
         bootProviders(socketProvider: socketProvider, driving: controller)
     }
@@ -111,6 +121,86 @@ public final class NotchideAppDelegate: NSObject, NSApplicationDelegate {
         otlpProvider?.stop()
         controller?.teardown()
         socketProvider?.stop()
+        if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
+        statusItem = nil
+    }
+
+    // MARK: Status menu (Preferences / Mute / Quit)
+
+    /// Installs the menu-bar status item and its menu. The notch stays a glance
+    /// surface; everything that is configuration rather than glance lives behind
+    /// "Preferences…", opened as a standard `NSWindow` hosting `PreferencesView`.
+    private func setupStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = item.button {
+            button.image = NSImage(
+                systemSymbolName: "sparkles",
+                accessibilityDescription: "notchide"
+            )
+            button.image?.isTemplate = true
+        }
+
+        let menu = NSMenu()
+
+        let preferences = NSMenuItem(
+            title: "Preferences…",
+            action: #selector(openPreferences),
+            keyEquivalent: ","
+        )
+        preferences.target = self
+        menu.addItem(preferences)
+
+        let mute = NSMenuItem(
+            title: "Mute notifications",
+            action: #selector(toggleMute),
+            keyEquivalent: ""
+        )
+        mute.target = self
+        mute.state = model.muted ? .on : .off
+        self.muteMenuItem = mute
+        menu.addItem(mute)
+
+        menu.addItem(.separator())
+
+        let quit = NSMenuItem(
+            title: "Quit notchide",
+            action: #selector(quit),
+            keyEquivalent: "q"
+        )
+        quit.target = self
+        menu.addItem(quit)
+
+        item.menu = menu
+        self.statusItem = item
+    }
+
+    /// Opens (or re-focuses) the Preferences window. The window and its hosting
+    /// controller are retained on `self` so the SwiftUI settings surface survives
+    /// past this call; `isReleasedWhenClosed = false` keeps the instance around
+    /// after the user closes it, so re-opening is instant.
+    @objc private func openPreferences() {
+        if preferencesWindow == nil {
+            let controller = NSHostingController(rootView: PreferencesView())
+            let window = NSWindow(contentViewController: controller)
+            window.title = "notchide Preferences"
+            window.styleMask = [.titled, .closable, .miniaturizable]
+            window.isReleasedWhenClosed = false
+            window.center()
+            preferencesWindow = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        preferencesWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Toggles global mute through the view model (whose `didSet` persists it via
+    /// `MuteSettings`), and mirrors the new state onto the menu-item checkmark.
+    @objc private func toggleMute() {
+        model.muted.toggle()
+        muteMenuItem?.state = model.muted ? .on : .off
+    }
+
+    @objc private func quit() {
+        NSApp.terminate(nil)
     }
 
     /// Starts the loopback OTLP receiver on the default port, falling back to an

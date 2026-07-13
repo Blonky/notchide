@@ -82,6 +82,19 @@ public struct ReviewContext: Identifiable, Equatable {
     }
 }
 
+/// The compact "prompt is done" pop shown for a beat before the Build stage
+/// blooms open (DESIGN §14). Carries just the two strings `DonePopView` renders:
+/// a short session label and a terse outcome line (`3 files · tests green`).
+public struct DonePop: Equatable {
+    public let session: String
+    public let summary: String
+
+    public init(session: String, summary: String) {
+        self.session = session
+        self.summary = summary
+    }
+}
+
 /// The on-screen state of the voice HUD, mirrored from `VoiceController.VoiceState`
 /// but flattened for the view layer (carrying the error message inline).
 ///
@@ -124,6 +137,16 @@ public final class NotchViewModel: ObservableObject {
     /// Bumped to trigger a subtle passive pulse of the collapsed pill (a
     /// non-decision tap pulses; it never auto-expands).
     @Published public var pillPulse: Int = 0
+    /// The finished-turn build artifact currently bloomed in the expanded notch
+    /// (DESIGN §14 Build stage). Non-nil only while a Build stage is on screen;
+    /// set by `NotchController` on a `.finished` event that carries an artifact,
+    /// cleared when the console furls or a review console supersedes it. A live
+    /// review (`review != nil`) always takes precedence over this.
+    @Published public var buildStage: BuildArtifact?
+    /// The transient "done pop" shown for a beat before the Build stage blooms
+    /// full (DESIGN §14). Non-nil only during that opening beat, then cleared so
+    /// the artifact expands open.
+    @Published public var donePop: DonePop?
     /// Global mute. Persisted; when set, the Suppressor never taps the user.
     @Published public var muted: Bool = MuteSettings.isMuted {
         didSet { MuteSettings.set(muted) }

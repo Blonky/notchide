@@ -56,6 +56,9 @@ public final class NotchController {
     private var hoverIntentTask: Task<Void, Never>?
     private var autoCollapseTask: Task<Void, Never>?
     private var hoverObserverTask: Task<Void, Never>?
+    /// Drives the done-pop → Build-stage bloom: after this task fires the done pop
+    /// is cleared and the full artifact expands open (DESIGN §14).
+    private var buildStageTask: Task<Void, Never>?
 
     /// The most recent event per session, kept so a summoned/hover-expanded lane
     /// can still render a rich console (tool name + last message) even though a
@@ -82,6 +85,9 @@ public final class NotchController {
     public var autoCollapseSeconds: Double = 12
     /// Hover-intent delay before a peek expands the console.
     public var hoverIntentSeconds: Double = 0.2
+    /// How long the compact done pop lingers before it blooms into the full
+    /// Build stage (DESIGN §14). Kept short — it is a beat, not a screen.
+    public var donePopSeconds: Double = 1.1
     /// App-side gate lifetime. Kept `>=` the sidecar's effective timeout
     /// (`HookTimeout.defaultMilliseconds`) so a late-but-valid click is never
     /// dropped by the app expiring the gate before the sidecar does.
@@ -208,6 +214,7 @@ public final class NotchController {
         hoverObserverTask?.cancel(); hoverObserverTask = nil
         hoverIntentTask?.cancel(); hoverIntentTask = nil
         autoCollapseTask?.cancel(); autoCollapseTask = nil
+        buildStageTask?.cancel(); buildStageTask = nil
         for task in gateExpiryTasks.values { task.cancel() }
         gateExpiryTasks.removeAll()
         hotkey?.stop()
@@ -275,6 +282,11 @@ public final class NotchController {
             // powers the "why did this tap?" line.
             let context = makeContext(fromEvent: event, capability: capability, reason: reason)
             await present(context)
+        } else if event.kind == .finished, let artifact = event.artifact {
+            // A finished turn that carries a Build artifact blooms the Build stage
+            // (DESIGN §14): a done pop, then the full artifact. This is HOST-mode's
+            // deliberate payoff surface (only a streaming adapter sets `artifact`).
+            await presentBuildStage(from: event, artifact: artifact)
         } else if tap {
             // A non-decision tap is passive: it only pulses the pill — never drops
             // the full console (silence-by-default, DESIGN §4.1/§8).
@@ -354,6 +366,8 @@ public final class NotchController {
     /// decision gate. Only called when the console is actually being shown, so
     /// the (hardened) git diff is computed only for on-screen reviews.
     private func show(_ context: ReviewContext) async {
+        // A review console supersedes any Build stage currently bloomed.
+        clearBuildStage()
         model.review = context
         model.waitingCount = pendingGates.count
         loadContext(for: context)
@@ -387,6 +401,69 @@ public final class NotchController {
     private func isPending(_ context: ReviewContext) -> Bool {
         guard let decisionID = context.decisionID else { return false }
         return outstandingGates.contains(decisionID)
+    }
+
+    // MARK: Private — Build stage (DESIGN §14)
+
+    /// Bloom the Build stage for a finished turn that carries an artifact: first a
+    /// brief compact "done pop", then the full artifact. Never replaces a live,
+    /// still-pending gate on screen — the payoff surface must not steal a decision.
+    private func presentBuildStage(from event: AgentEvent, artifact: BuildArtifact) async {
+        if let review = model.review, review.wantsDecision, isPending(review) { return }
+        buildStageTask?.cancel()
+        model.donePop = DonePop(
+            session: Self.buildStageSessionLabel(for: event),
+            summary: Self.donePopSummary(for: artifact)
+        )
+        model.buildStage = artifact
+        await expand()
+        // After the done-pop beat, drop the pop so the artifact blooms full.
+        let seconds = donePopSeconds
+        buildStageTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            self.model.donePop = nil
+        }
+    }
+
+    /// Tears down any on-screen Build stage (done pop + artifact) and its bloom
+    /// timer. Called whenever a review console supersedes it or the console furls.
+    private func clearBuildStage() {
+        buildStageTask?.cancel()
+        buildStageTask = nil
+        model.donePop = nil
+        model.buildStage = nil
+    }
+
+    /// A short session label for the done pop: the event title if it has one,
+    /// else a truncated agent session id, else the cwd's leaf.
+    private static func buildStageSessionLabel(for event: AgentEvent) -> String {
+        if let title = event.title, !title.isEmpty { return title }
+        let sid = event.sessionKey.agentSessionID
+        if !sid.isEmpty { return sid.count > 8 ? String(sid.prefix(8)) : sid }
+        let cwd = event.cwd ?? event.sessionKey.cwd
+        return cwd.split(separator: "/").last.map(String.init) ?? "session"
+    }
+
+    /// The terse one-line outcome under the done pop's session name — mirrors the
+    /// Build-stage header's read of the same artifact.
+    private static func donePopSummary(for artifact: BuildArtifact) -> String {
+        switch artifact {
+        case .livePreview:
+            return "live preview"
+        case .diff(let files):
+            return "\(files.count) \(files.count == 1 ? "file" : "files")"
+        case .tests(let summary):
+            return summary.failed == 0 ? "tests green" : "\(summary.failed) failing"
+        case .logs(_, let hasErrors):
+            return hasErrors ? "logs · errors" : "logs"
+        case .document:
+            return "document"
+        case .screens:
+            return "screens"
+        case .error:
+            return "build failed"
+        }
     }
 
     // MARK: Private — expansion state machine
@@ -439,6 +516,7 @@ public final class NotchController {
     /// cockpit / hidden.
     public func collapse() async {
         cancelGateExpiry(for: model.review?.decisionID)
+        clearBuildStage()
         model.review = nil
         model.isPinned = false
         if let next = dequeueNextGate() {
@@ -454,6 +532,7 @@ public final class NotchController {
     /// and can be re-summoned; each still fails open on its own timeout.
     private func furl() async {
         cancelGateExpiry(for: model.review?.decisionID)
+        clearBuildStage()
         model.review = nil
         model.isPinned = false
         await settle()
