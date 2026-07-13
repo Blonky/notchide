@@ -120,6 +120,68 @@ struct SessionStoreRailsTests {
         #expect(await store.abandonGate(for: key("nope")) == nil)
     }
 
+    // MARK: - Observe-only enrichment (OTLP side-channel)
+
+    @Test("enrich drops an event for an untracked session — it never opens a lane")
+    func enrichNeverOpensLane() async {
+        let store = SessionStore()
+        // No prior ingest for this session: nothing to enrich.
+        #expect(await store.enrich(with: event(.progress, session: "ghost")) == nil)
+        #expect(await store.currentLanes().isEmpty)
+    }
+
+    @Test("enrich merges detail into an existing lane without changing its lifecycle state")
+    func enrichMergesDetailPreservingState() async {
+        let store = SessionStore()
+        await store.register(provider, decisionCapability: .notifyOnly)
+        _ = await store.ingest(event(.started, session: "s", command: "build"))
+        let k = key("s")
+        #expect(await store.currentLanes().first { $0.id == k }?.state == .flowing)
+
+        // An OTLP progress enrichment carrying a newer command.
+        let result = await store.enrich(with: event(.progress, session: "s", command: "compile Foo.swift"))
+        #expect(result == .flowing) // state unchanged
+
+        let lane = await store.currentLanes().first { $0.id == k }
+        #expect(lane?.state == .flowing)
+        #expect(lane?.lastCommand == "compile Foo.swift")
+        #expect(lane?.lastEvent == AgentEventKind.progress.rawValue)
+    }
+
+    @Test("enrich never clobbers a live gate: a needsYou lane keeps its state and pending decision")
+    func enrichPreservesLiveGate() async {
+        let store = SessionStore()
+        await store.register(provider, decisionCapability: .blocking)
+        _ = await store.ingest(event(
+            .needsDecision, session: "g", command: "rm -rf build/",
+            decision: DecisionRequest(prompt: "rm -rf build/")))
+        let k = key("g")
+        #expect(await store.currentLanes().first { $0.id == k }?.state == .needsYou)
+
+        // A concurrent OTLP progress event must NOT flip the gate back to flowing
+        // or drop the pending decision.
+        _ = await store.enrich(with: event(.progress, session: "g"))
+        let lane = await store.currentLanes().first { $0.id == k }
+        #expect(lane?.state == .needsYou)
+        #expect(lane?.pendingDecision != nil)
+        #expect(lane?.showsDecisionButtons == true)
+    }
+
+    @Test("enrich refreshes liveness on an existing lane")
+    func enrichRefreshesLiveness() async {
+        let clock = MutableClock(Date(timeIntervalSince1970: 50_000))
+        let store = SessionStore(now: clock.now, livenessTTL: 30)
+        _ = await store.ingest(event(.progress, session: "s"))
+        let k = key("s")
+
+        clock.advance(31) // lane is now stale by event time
+        #expect(await store.liveness(for: k) == .stale)
+
+        // An OTLP enrichment IS a real liveness signal, so it refreshes the TTL.
+        _ = await store.enrich(with: event(.progress, session: "s"))
+        #expect(await store.liveness(for: k) == .live)
+    }
+
     // MARK: - (c) Liveness TTL
 
     @Test("a lane with no event within the TTL reports stale; a fresh lane reports live")

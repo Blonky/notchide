@@ -230,6 +230,38 @@ public actor SessionStore {
         }
     }
 
+    // MARK: - Observe-only enrichment
+
+    /// Merges an observe-only enrichment event (e.g. from the OTLP telemetry
+    /// side-channel) into the EXISTING lane for `event.sessionKey`, matched by
+    /// session id.
+    ///
+    /// Enrichment is strictly additive: it refreshes the lane's detail (last event
+    /// kind, last command, cwd) and its liveness, but it NEVER opens a new lane and
+    /// NEVER drives the lane's lifecycle — the coarse `state` and any
+    /// `pendingDecision` are left exactly as they were. So a lossy telemetry
+    /// side-channel can enrich a hook/sidecar lane, but can never open a lane it
+    /// does not own, seize the user (`needsYou`), finish a turn (`done`), or
+    /// clobber a live gate.
+    ///
+    /// - Returns: the lane's (unchanged) state, or `nil` if no lane exists for
+    ///   `event.sessionKey` — an enrichment for an untracked session is dropped,
+    ///   so it can never open a lane.
+    @discardableResult
+    public func enrich(with event: AgentEvent) -> LaneState? {
+        let key = event.sessionKey
+        guard var lane = lanes[key] else { return nil }
+        lane.lastEvent = event.kind.rawValue
+        if let command = event.command { lane.lastCommand = command }
+        if !key.cwd.isEmpty { lane.cwd = key.cwd }
+        let timestamp = now()
+        lane.updatedAt = timestamp
+        lane.lastEventAt = timestamp
+        lanes[key] = lane
+        broadcast()
+        return lane.state
+    }
+
     // MARK: - Gate abandonment
 
     /// Abandons the in-flight gate on `key`'s lane (the app-side dual of the
