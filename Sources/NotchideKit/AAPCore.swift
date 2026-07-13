@@ -50,10 +50,16 @@ public struct SessionKey: Hashable, Sendable, Codable {
 /// - `observe`: report status/progress (read-only).
 /// - `gate`: block the agent awaiting a permission decision.
 /// - `actuate`: receive app-pushed `prompt` / `interrupt` frames to drive its agent.
+/// - `observeScreen`: the app may hand the agent an on-request screenshot as
+///   context (read-only visual observation).
+/// - `controlScreen`: the agent may drive the pointer/keyboard. This is the
+///   highest privilege a provider can advertise.
 public enum Capability: String, Sendable, Codable, CaseIterable {
     case observe
     case gate
     case actuate
+    case observeScreen
+    case controlScreen
 }
 
 /// Whether a provider's decisions may seize the user.
