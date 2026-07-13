@@ -149,11 +149,34 @@ public struct AgentDecision: Sendable, Codable, Equatable {
 
 /// A minimal action a caller can push back to a provider via `actuate`.
 ///
-/// Deliberately small for now; `actuate` has a no-op default so providers that
-/// only observe/gate need not implement it.
+/// `actuate` has a no-op default so providers that only observe/gate need not
+/// implement it. `.prompt` / `.interrupt` are the voice-driven ACTUATE actions:
+/// they are pushed to the owning provider over the duplex socket as
+/// `ActuateFrame`s (see `SocketAAPProvider.actuate`). `.resume` / `.answer`
+/// predate that path and are not carried on the actuate wire.
 public enum AgentAction: Sendable, Equatable {
     /// Resume a paused/blocked session.
     case resume(SessionKey)
-    /// Send free-text back to the agent (e.g. answer a prompt).
+    /// Reply to an outstanding prompt/gate with free text.
+    ///
+    /// Distinct from `.prompt`: `.answer` responds to something the agent asked;
+    /// `.prompt` initiates a fresh instruction.
     case answer(SessionKey, String)
+    /// Send a FRESH natural-language instruction to a session (voice ACTUATE).
+    /// Carried on the wire as an `ActuateFrame` of kind `.prompt`.
+    case prompt(SessionKey, String)
+    /// Barge-in: interrupt whatever the session is currently doing.
+    /// Carried on the wire as an `ActuateFrame` of kind `.interrupt`.
+    case interrupt(SessionKey)
+
+    /// The session this action targets. Used to route the action to the provider
+    /// that owns the session.
+    public var sessionKey: SessionKey {
+        switch self {
+        case .resume(let key), .interrupt(let key):
+            return key
+        case .answer(let key, _), .prompt(let key, _):
+            return key
+        }
+    }
 }

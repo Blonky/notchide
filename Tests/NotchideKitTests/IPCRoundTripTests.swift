@@ -107,6 +107,87 @@ struct IPCRoundTripTests {
         #expect(box.value?.event.title == "hi")
     }
 
+    // MARK: - ActuateFrame wire shape + framing
+
+    private func actuateKey() -> SessionKey {
+        SessionKey(provider: provider, agentSessionID: "sess", cwd: "/tmp")
+    }
+
+    @Test("ActuateFrame (prompt) round-trips and carries its text")
+    func actuatePromptRoundTrip() throws {
+        let frame = ActuateFrame(sessionKey: actuateKey(), kind: .prompt, text: "run the tests")
+        let data = try NDJSON.encode(frame)
+        let decoded = try JSONDecoder().decode(ActuateFrame.self, from: data)
+        #expect(decoded == frame)
+        #expect(decoded.text == "run the tests")
+
+        // Wire shape: a top-level `actuate` wrapper with a nested sessionKey.
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let body = try #require(object["actuate"] as? [String: Any])
+        #expect(body["kind"] as? String == "prompt")
+        #expect(body["text"] as? String == "run the tests")
+        let key = try #require(body["sessionKey"] as? [String: Any])
+        #expect(key["provider"] as? String == provider.raw)
+        #expect(key["agentSessionID"] as? String == "sess")
+        #expect(key["cwd"] as? String == "/tmp")
+    }
+
+    @Test("ActuateFrame (interrupt) round-trips and omits text on the wire")
+    func actuateInterruptRoundTrip() throws {
+        // Even if a caller passes text, interrupt normalizes it away.
+        let frame = ActuateFrame(sessionKey: actuateKey(), kind: .interrupt, text: "ignored")
+        #expect(frame.text == nil)
+        let data = try NDJSON.encode(frame)
+        let decoded = try JSONDecoder().decode(ActuateFrame.self, from: data)
+        #expect(decoded == frame)
+        #expect(decoded.text == nil)
+
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let body = try #require(object["actuate"] as? [String: Any])
+        #expect(body["kind"] as? String == "interrupt")
+        #expect(body["text"] == nil, "interrupt must not carry a text key")
+    }
+
+    @Test("ActuateFrame decodes from the documented literal wire JSON")
+    func actuateDecodesLiteral() throws {
+        let json = """
+        {"actuate":{"sessionKey":{"provider":"sh.claude","agentSessionID":"s","cwd":"/tmp"},"kind":"prompt","text":"hi there world"}}
+        """
+        let frame = try JSONDecoder().decode(ActuateFrame.self, from: Data(json.utf8))
+        #expect(frame.kind == .prompt)
+        #expect(frame.text == "hi there world")
+        #expect(frame.sessionKey == SessionKey(provider: ProviderID("sh.claude"), agentSessionID: "s", cwd: "/tmp"))
+    }
+
+    @Test("AAPFrame.classify distinguishes handshake / envelope / decision / actuate / unknown")
+    func frameClassification() throws {
+        let handshake = AAPHandshake(providerID: provider, capabilities: [.observe, .gate, .actuate])
+        let envelope = gateEnvelope(wantsDecision: true)
+        let decision = AgentDecision(id: envelope.id, verdict: .allow, reason: "ok")
+        let actuate = ActuateFrame(sessionKey: actuateKey(), kind: .interrupt)
+
+        if case .handshake(let value) = AAPFrame.classify(line: try NDJSON.encode(handshake)) {
+            #expect(value == handshake)
+        } else { Issue.record("expected .handshake") }
+
+        if case .envelope(let value) = AAPFrame.classify(line: try NDJSON.encode(envelope)) {
+            #expect(value == envelope)
+        } else { Issue.record("expected .envelope") }
+
+        if case .decision(let value) = AAPFrame.classify(line: try NDJSON.encode(decision)) {
+            #expect(value == decision)
+        } else { Issue.record("expected .decision") }
+
+        if case .actuate(let value) = AAPFrame.classify(line: try NDJSON.encode(actuate)) {
+            #expect(value == actuate)
+        } else { Issue.record("expected .actuate") }
+
+        #expect(AAPFrame.classify(line: Data("not json".utf8)) == .unknown)
+        #expect(AAPFrame.classify(line: Data(#"{"weird":true}"#.utf8)) == .unknown)
+    }
+
     @Test("connect to a missing socket throws (the adapter treats this as fail-open)")
     func connectFailure() {
         let path = tempSocketPath() // nothing listening

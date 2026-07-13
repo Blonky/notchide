@@ -28,7 +28,12 @@ public struct ProviderID: Hashable, Sendable, Codable {
 /// Replaces the old bare-`String` session key. Enrichment providers merge on the
 /// full tuple `(provider, agentSessionID, cwd)`, so two providers reporting the
 /// same `agentSessionID` never cross-wire into one lane.
-public struct SessionKey: Hashable, Sendable {
+///
+/// `Codable` conformance encodes as a nested object
+/// `{"provider":"…","agentSessionID":"…","cwd":"…"}` and is used by the
+/// `ActuateFrame` wire shape. (`AgentEvent` keeps its own flat encoding and does
+/// not use this conformance, so adding it changes no existing wire format.)
+public struct SessionKey: Hashable, Sendable, Codable {
     public let provider: ProviderID
     public let agentSessionID: String
     public let cwd: String

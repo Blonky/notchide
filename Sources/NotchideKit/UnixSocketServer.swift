@@ -30,6 +30,10 @@ public final class UnixSocketServer: @unchecked Sendable {
     private let handler: Handler
     private let onHandshake: HandshakeObserver?
 
+    /// Live actuate-capable connections, so the server can PUSH `ActuateFrame`s
+    /// back to a specific provider's connection (the duplex direction).
+    private let actuateRegistry: ActuateRegistry
+
     private let lock = NSLock()
     private var running = false
     private var listenFD: Int32 = -1
@@ -47,6 +51,18 @@ public final class UnixSocketServer: @unchecked Sendable {
         self.socketPath = socketPath
         self.onHandshake = onHandshake
         self.handler = handler
+        self.actuateRegistry = ActuateRegistry()
+    }
+
+    /// Pushes an `ActuateFrame` to the live actuate-capable connection owning
+    /// `providerID` (the connection that advertised `.actuate` in its handshake).
+    ///
+    /// Returns `true` iff the frame was written. If there is no live actuate
+    /// connection for the target — never connected, disconnected, or mid-
+    /// reconnect — the push is a logged no-op returning `false`; it never crashes.
+    @discardableResult
+    func sendActuate(_ frame: ActuateFrame, to providerID: ProviderID) -> Bool {
+        actuateRegistry.send(frame, to: providerID)
     }
 
     /// Binds the socket and starts accepting connections on a background thread.
@@ -161,9 +177,13 @@ public final class UnixSocketServer: @unchecked Sendable {
             // human deciding a permission gate) cannot block other connections.
             let connectionHandler = handler
             let connectionHandshake = onHandshake
+            let connectionRegistry = actuateRegistry
             Thread.detachNewThread {
                 UnixSocketServer.handleConnection(
-                    fd: clientFD, handler: connectionHandler, onHandshake: connectionHandshake)
+                    fd: clientFD,
+                    handler: connectionHandler,
+                    onHandshake: connectionHandshake,
+                    registry: connectionRegistry)
             }
         }
     }
@@ -171,7 +191,8 @@ public final class UnixSocketServer: @unchecked Sendable {
     private static func handleConnection(
         fd: Int32,
         handler: @escaping Handler,
-        onHandshake: HandshakeObserver?
+        onHandshake: HandshakeObserver?,
+        registry: ActuateRegistry
     ) {
         defer { close(fd) }
         let reader = FDLineReader(fd: fd)
@@ -186,10 +207,31 @@ public final class UnixSocketServer: @unchecked Sendable {
               handshake.isSupportedVersion else {
             return
         }
+        let capabilities = handshake.capabilities
+
+        // ── Duplex registration ────────────────────────────────────────────────
+        // A connection that advertises `.actuate` is kept alive by the reader
+        // loop below AND registered as a writer so the server can push
+        // `ActuateFrame`s to it. Registration happens BEFORE the handshake
+        // observer fires, so an observer that immediately actuates finds the
+        // connection live. The `deregister` defer runs before `close(fd)`
+        // (defers are LIFO), marking the connection closed while the fd is still
+        // valid — so no push can race the close.
+        let actuateConnection: ActuateConnection?
+        if capabilities.contains(.actuate) {
+            let connection = ActuateConnection(providerID: handshake.providerID, fd: fd)
+            registry.register(connection)
+            actuateConnection = connection
+        } else {
+            actuateConnection = nil
+        }
+        defer {
+            if let actuateConnection { registry.deregister(actuateConnection) }
+        }
+
         if let onHandshake {
             runBlocking { await onHandshake(handshake) }
         }
-        let capabilities = handshake.capabilities
 
         loop: while true {
             switch reader.nextLine() {
@@ -206,7 +248,17 @@ public final class UnixSocketServer: @unchecked Sendable {
                 let decisionAllowed = envelope.wantsDecision && capabilities.contains(.gate)
                 let decision = runBlocking { await handler(envelope, capabilities) }
                 if decisionAllowed, let decision, let frame = try? NDJSON.encode(decision) {
-                    writeAllBytes(fd: fd, Array(frame))
+                    // On an actuate-capable connection, route the decision
+                    // writeback through the same serialized writer used by
+                    // pushes, so a concurrent actuate push cannot interleave
+                    // with the decision on the shared fd. On a gate-only
+                    // connection there is no second writer, so write directly —
+                    // preserving the original behavior exactly.
+                    if let actuateConnection {
+                        actuateConnection.write(Array(frame))
+                    } else {
+                        writeAllBytes(fd: fd, Array(frame))
+                    }
                 }
             }
         }

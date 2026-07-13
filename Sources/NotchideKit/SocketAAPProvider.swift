@@ -61,7 +61,7 @@ public final class SocketAAPProvider: AgentProvider, @unchecked Sendable {
     public static let defaultDescriptor = ProviderDescriptor(
         id: SocketAAPProvider.providerID,
         displayName: "AAP Socket",
-        capabilities: [.observe, .gate],
+        capabilities: [.observe, .gate, .actuate],
         decisionCapability: .blocking
     )
 
@@ -83,6 +83,33 @@ public final class SocketAAPProvider: AgentProvider, @unchecked Sendable {
 
     public func resolve(_ decision: AgentDecision) async {
         takePending(decision.id)?.resume(returning: decision)
+    }
+
+    /// Pushes an ACTUATE action to the HOST provider that owns the target
+    /// session, over the live actuate-capable connection registered at handshake
+    /// time.
+    ///
+    /// Only `.prompt` / `.interrupt` travel the actuate wire; `.resume` /
+    /// `.answer` are handled elsewhere and are safe no-ops here (preserving the
+    /// previous no-op behavior). If there is no live actuate connection owning
+    /// the target session's provider — unknown session, or the adapter has
+    /// disconnected — the push is dropped safely (a logged no-op), never a crash.
+    public func actuate(_ action: AgentAction) async {
+        guard let frame = SocketAAPProvider.actuateFrame(for: action) else { return }
+        server.sendActuate(frame, to: action.sessionKey.provider)
+    }
+
+    /// Maps an `AgentAction` to the `ActuateFrame` pushed on the wire, or `nil`
+    /// for actions that are not carried on the actuate channel.
+    static func actuateFrame(for action: AgentAction) -> ActuateFrame? {
+        switch action {
+        case .prompt(let key, let text):
+            return ActuateFrame(sessionKey: key, kind: .prompt, text: text)
+        case .interrupt(let key):
+            return ActuateFrame(sessionKey: key, kind: .interrupt)
+        case .resume, .answer:
+            return nil
+        }
     }
 
     // MARK: - Internals

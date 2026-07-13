@@ -65,6 +65,98 @@ public struct AgentEnvelope: Codable, Sendable, Equatable {
     }
 }
 
+/// A server→adapter push frame carrying one ACTUATE action to a live,
+/// actuate-capable connection.
+///
+/// Wire shape (the top-level `actuate` key is the framing tag):
+/// ```json
+/// {"actuate":{"sessionKey":{"provider":"sh.claude","agentSessionID":"s","cwd":"/tmp"},
+///             "kind":"prompt","text":"run the tests"}}
+/// ```
+/// `text` is present iff `kind == .prompt` (a `.interrupt` carries no text).
+/// Distinct from `AgentEnvelope`/`AgentDecision`, which travel the other
+/// direction; the `actuate` wrapper key lets a duplex reader tell them apart.
+public struct ActuateFrame: Sendable, Equatable {
+    /// Whether this frame delivers a fresh prompt or a barge-in interrupt.
+    public enum Kind: String, Sendable, Codable, Equatable {
+        case prompt
+        case interrupt
+    }
+
+    public let sessionKey: SessionKey
+    public let kind: Kind
+    /// The instruction text. Non-nil only for `.prompt`; normalized to `nil` for
+    /// `.interrupt` so the invariant holds regardless of the caller.
+    public let text: String?
+
+    public init(sessionKey: SessionKey, kind: Kind, text: String? = nil) {
+        self.sessionKey = sessionKey
+        self.kind = kind
+        self.text = (kind == .prompt) ? text : nil
+    }
+}
+
+extension ActuateFrame: Codable {
+    private enum RootKeys: String, CodingKey { case actuate }
+
+    private struct Body: Codable {
+        let sessionKey: SessionKey
+        let kind: Kind
+        let text: String?
+    }
+
+    public init(from decoder: Decoder) throws {
+        let root = try decoder.container(keyedBy: RootKeys.self)
+        let body = try root.decode(Body.self, forKey: .actuate)
+        self.init(sessionKey: body.sessionKey, kind: body.kind, text: body.text)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var root = encoder.container(keyedBy: RootKeys.self)
+        // `text` stays nil for `.interrupt`, so JSONEncoder omits the key — the
+        // "text present iff prompt" invariant is preserved on the wire.
+        try root.encode(
+            Body(sessionKey: sessionKey, kind: kind, text: kind == .prompt ? text : nil),
+            forKey: .actuate)
+    }
+}
+
+/// Classification of one inbound NDJSON line on a duplex AAP connection.
+///
+/// The four AAP line shapes are structurally distinguishable by their top-level
+/// keys — `aap` (handshake), `actuate` (push frame), `verdict` (decision), and
+/// `event` (envelope) — so a reader can dispatch a line without an out-of-band
+/// tag. `.unknown` degrades gracefully (a newer/odd frame is skipped, never a
+/// crash), mirroring the lenient decoding used elsewhere.
+public enum AAPFrame: Sendable, Equatable {
+    case handshake(AAPHandshake)
+    case envelope(AgentEnvelope)
+    case decision(AgentDecision)
+    case actuate(ActuateFrame)
+    case unknown
+
+    /// Classifies one raw NDJSON line by peeking at its top-level keys, then
+    /// decoding the matching type. Never throws.
+    public static func classify(line: Data) -> AAPFrame {
+        guard let object = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any] else {
+            return .unknown
+        }
+        if object["aap"] != nil, let value = try? JSONDecoder().decode(AAPHandshake.self, from: line) {
+            return .handshake(value)
+        }
+        if object["actuate"] != nil, let value = try? JSONDecoder().decode(ActuateFrame.self, from: line) {
+            return .actuate(value)
+        }
+        if object["verdict"] != nil, let value = try? JSONDecoder().decode(AgentDecision.self, from: line) {
+            return .decision(value)
+        }
+        if object["event"] != nil, let value = try? JSONDecoder().decode(AgentEnvelope.self, from: line) {
+            return .envelope(value)
+        }
+        return .unknown
+    }
+}
+
 /// Newline-delimited JSON (NDJSON) framing helpers.
 ///
 /// Each value is encoded as a single line of JSON terminated by `\n`, which is
