@@ -10,6 +10,7 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { AapClient, defaultSocketPath } from './aap.js';
 import { Bridge } from './bridge.js';
+import { SelfExit } from './lifecycle.js';
 
 function log(msg) {
   process.stderr.write(`[notchide-claude] ${msg}\n`);
@@ -38,26 +39,34 @@ async function main() {
   }
   sdkOptions.stderr = (data) => process.stderr.write(data);
 
-  const client = new AapClient({ socketPath, log });
+  // reconnect is disabled: the sidecar owns a single PAID query whose only
+  // lifeline is this socket. A drop means the hub (our parent) is gone — we
+  // tear the query down and exit (see SelfExit) rather than reconnect and
+  // orphan the running session.
+  const client = new AapClient({ socketPath, log, reconnect: false });
   const bridge = new Bridge({ client, queryFn: query, cwd, sdkOptions, log });
 
-  let shuttingDown = false;
-  const shutdown = (code) => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    log('shutting down');
-    try {
-      bridge.stop();
-    } catch { /* ignore */ }
-    try {
-      client.close();
-    } catch { /* ignore */ }
-    // Give sockets a tick to flush, then exit.
-    setTimeout(() => process.exit(code), 50).unref?.();
-  };
+  // Single exit path. `teardown` aborts the live query and closes the socket;
+  // `onExit` flushes for a tick, then exits. Fires exactly once, whether it is
+  // reached via a lost lifeline, a signal, or the stream ending normally.
+  const selfExit = new SelfExit({
+    teardown: () => {
+      try { bridge.teardown(); } catch { /* ignore */ }
+      try { client.close(); } catch { /* ignore */ }
+    },
+    onExit: (code) => {
+      setTimeout(() => process.exit(code), 50).unref?.();
+    },
+    log,
+  });
 
-  process.on('SIGINT', () => shutdown(0));
-  process.on('SIGTERM', () => shutdown(0));
+  // Lifeline: any socket end/close/error means the hub is unreachable → exit.
+  client.on('socket', (socket) => selfExit.watchSocket(socket));
+  // AapClient re-emits socket errors as a client 'error'; absorb them so an
+  // error event never crashes the process before SelfExit runs.
+  client.on('error', (err) => log(`aap: client error: ${err?.message ?? err}`));
+  // A `kill` of the sidecar tears down the paid query too.
+  selfExit.watchSignals();
 
   client.connect();
 
@@ -65,7 +74,7 @@ async function main() {
     // Resolves when the SDK stream ends; rejects on a spawn/stream failure.
     await bridge.start();
     log('session stream ended');
-    shutdown(0);
+    selfExit.trigger('session stream ended', 0);
   } catch (err) {
     if (looksLikeMissingBinary(err)) {
       log('FATAL: could not spawn the Claude Code binary.');
@@ -75,7 +84,7 @@ async function main() {
     } else {
       log(`FATAL: session failed: ${err?.message ?? err}`);
     }
-    shutdown(1);
+    selfExit.trigger('session failed', 1);
   }
 }
 
