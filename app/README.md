@@ -65,9 +65,11 @@ xcodebuild -project notchide.xcodeproj \
 # then codesign + notarize + staple into a direct-download .dmg
 ```
 
-Notarization and the private-framework (SkyLight / `CGSSpace`) work needed to
-draw above *every* fullscreen Space are a later milestone — see
-[docs/DESIGN.md §10](../docs/DESIGN.md) and [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
+Notarized, non-sandboxed packaging (Developer ID + Hardened Runtime + notarize + staple)
+is a later milestone. The overlay that draws over *every* fullscreen Space is **public
+AppKit** — no private framework; the weak-linked **SkyLight** symbols only sharpen
+per-Space suppression, never draw. See [docs/DESIGN.md §10](../docs/DESIGN.md) and
+[docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 
 ## Hooks — the app installs nothing on its own
 

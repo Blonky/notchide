@@ -50,6 +50,15 @@ notchide is **one object in two states**.
   git diff of what the agent just changed, and a tail of its output. You decide, and the
   panel furls back up. The app behind you was never focused.
 
+<div align="center">
+<br/>
+
+<img src="docs/media/cockpit.png" alt="notchide's collapsed cockpit across three states: an idle notch that stays calm, then one agent's amber 'needs-you' glyph, then three agents tracked at once — color and motion, no text" width="840">
+
+<sub>Collapsed — one glyph per session. Idle stays calm; a blocked agent pulses amber; three agents read at a glance, needs-you first.</sub>
+
+</div>
+
 ## Steer by voice
 
 Hold **⌃⌥**, say what you want, and let go — notchide routes your words to a **running agent
@@ -68,16 +77,24 @@ platform's third verb, **STEER**, and it is deliberately narrow.
   gate: an `rm -rf` a spoken instruction triggers still stops at the normal permission gate and
   waits for your deliberate Approve/Deny in the console.
 
-Wire detail: [the actuate frame in PROTOCOL.md](docs/PROTOCOL.md#7-the-actuate-frame).
-Interaction mockup: [docs/media/voice.html](docs/media/voice.html).
+<div align="center">
+<br/>
+
+<img src="docs/media/voice.png" alt="notchide voice drive — the push-to-talk loop: hold Control-Option to talk, then an on-device Listening HUD streams the transcript 'add rate limiting to the payments endpoint' routed to agent #2, with nothing leaving your Mac" width="840">
+
+<sub>Hold <b>⌃⌥</b>, speak, release — on-device transcription streams into the notch and routes to the session you summon, never keystrokes into the focused app.</sub>
+
+</div>
+
+Wire detail: [the actuate frame in PROTOCOL.md](docs/PROTOCOL.md#7-the-actuate-frame). The full
+interaction mockup — all six states — is in [docs/media/voice.html](docs/media/voice.html).
 
 ## Demo
 
-<!-- The demo GIF is coming. Drop it at docs/media/demo.gif and it renders here. -->
-
-![notchide demo — a blocked Claude Code session pulses amber in the notch, the console drops down with a git diff and Approve/Deny, and furls back up](docs/media/demo.gif)
-
-> _Demo GIF coming soon (`docs/media/demo.gif`)._
+The renders above and below are concept mockups of the shipping UI. A screen-recorded demo GIF
+lands with the first hardware build; until then, the full display system — all ten states — is in
+[docs/media/gallery.html](docs/media/gallery.html), and the six-state voice loop is in
+[docs/media/voice.html](docs/media/voice.html).
 
 ## Why notchide
 
@@ -188,11 +205,15 @@ detail in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ### Notarized .dmg (coming soon)
 
-notchide ships as a **notarized, direct-download `.dmg`** — not via the Mac App Store. This
-is deliberate: drawing above fullscreen apps and the lock screen, and hiding from screen
-capture, needs private frameworks (SkyLight / `CGSSpace`) that the App Store forbids. The
-first engineering milestone is a notarization smoke test proving a private-framework `.dmg`
-passes Apple notarization before we build on it.
+notchide ships as a **notarized, direct-download `.dmg`** — not via the Mac App Store. The
+blocker is the **sandbox** (App-Store-only), which notchide can't adopt: it needs a `CGEventTap`
+for push-to-talk, the shared `agent.sock` path a **separate** hook process must reach, and a
+weak-linked **SkyLight** symbol used *only* to sharpen per-Space suppression — never to draw. The
+overlay itself is **public AppKit**: drawing over a fullscreen app needs no private framework. By
+design notchide renders **nothing** over the lock screen and makes **no** screen-capture-hiding
+promise (both are security anti-goals — see [docs/DESIGN.md §10](docs/DESIGN.md)). The first
+engineering milestone is a notarization smoke test proving the non-sandboxed, Hardened-Runtime
+`.dmg` passes Apple notarization before we build on it.
 
 > Direct-download `.dmg`: **coming soon.**
 

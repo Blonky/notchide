@@ -46,8 +46,8 @@ deps, "works on my machine" and "works in CI" should not diverge.
 
 ### The GUI app (`app/`)
 
-Built on your Mac with Xcode — it draws to the notch and links private frameworks, so it is not
-part of CI:
+Built on your Mac with Xcode — it needs the full toolchain and pulls DynamicNotchKit over the
+network, so it is not part of the offline CI job:
 
 ```sh
 cd app
@@ -77,8 +77,9 @@ Respect the split — it's what keeps the core testable and offline:
   DynamicNotchKit, AppKit-heavy UI, or the diff-highlighting libraries into the core.
 - **`notchide-hook`** is a thin CLI over `NotchideKit`. Keep logic in the library; keep the
   executable a small shell.
-- **`app/`** is the only place DynamicNotchKit, SwiftUI/AppKit UI, private frameworks, and the
-  planned diff-highlighting stack (Neon / SwiftTreeSitter / CodeEditLanguages) may appear.
+- **`app/`** is the only place DynamicNotchKit, SwiftUI/AppKit UI, the weak-linked SkyLight
+  suppression symbols, and the planned diff-highlighting stack (Neon / SwiftTreeSitter /
+  CodeEditLanguages) may appear.
 - **Desktop-coupled logic hides behind a protocol.** "What is frontmost on the active Space" is
   `FrontmostContextProviding`, so the `Suppressor` policy stays a pure, offline-testable
   predicate. New OS-coupled behavior should follow the same pattern.
