@@ -22,7 +22,8 @@ public struct NotchRootView: View {
             VoiceHUDView(model: model)
         } else if model.review != nil {
             // A gate is on screen; a gate-verdict voice session overlays a compact
-            // "say approve / deny" strip at the bottom of the console.
+            // "say approve / deny" strip at the bottom of the console. A live gate
+            // always wins over a Build stage (which is why this branch precedes it).
             ZStack(alignment: .bottom) {
                 ReviewConsoleView(model: model)
                 if model.voiceState.isActive && model.voiceGateMode {
@@ -31,9 +32,30 @@ public struct NotchRootView: View {
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
+        } else if model.donePop != nil || model.buildStage != nil {
+            // A finished turn carrying an artifact (DESIGN §14): the compact "done
+            // pop" lands first, then it blooms into the full Build stage once
+            // `NotchController` clears `donePop`.
+            buildStageBloom
         } else {
             CockpitView(model: model)
         }
+    }
+
+    /// The Build-stage presentation: the transient done pop first, then the full
+    /// artifact blooming open once `NotchController` clears `model.donePop`.
+    @ViewBuilder
+    private var buildStageBloom: some View {
+        ZStack {
+            if let pop = model.donePop {
+                DonePopView(session: pop.session, summary: pop.summary)
+                    .transition(.scale(scale: 0.9).combined(with: .opacity))
+            } else if let artifact = model.buildStage {
+                BuildStageView(artifact: artifact)
+                    .transition(.scale(scale: 0.96).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.36, dampingFraction: 0.78), value: model.donePop)
     }
 }
 
