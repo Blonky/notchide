@@ -17,8 +17,20 @@ public struct NotchRootView: View {
     }
 
     public var body: some View {
-        if model.review != nil {
-            ReviewConsoleView(model: model)
+        if model.voiceState.isActive && !model.voiceGateMode {
+            // A fresh voice ACTUATE prompt (no gate on screen): the HUD is the panel.
+            VoiceHUDView(model: model)
+        } else if model.review != nil {
+            // A gate is on screen; a gate-verdict voice session overlays a compact
+            // "say approve / deny" strip at the bottom of the console.
+            ZStack(alignment: .bottom) {
+                ReviewConsoleView(model: model)
+                if model.voiceState.isActive && model.voiceGateMode {
+                    VoiceHUDView(model: model)
+                        .padding(.bottom, Theme.Spacing.md)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
         } else {
             CockpitView(model: model)
         }

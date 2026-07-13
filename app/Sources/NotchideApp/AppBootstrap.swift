@@ -33,6 +33,7 @@ public final class NotchideAppDelegate: NSObject, NSApplicationDelegate {
     private let remembered = RememberedStore()
     private var controller: NotchController?
     private var socketProvider: SocketAAPProvider?
+    private var hostLauncher: HostSessionLauncher?
     private var lanesTask: Task<Void, Never>?
     private var eventsTask: Task<Void, Never>?
 
@@ -70,6 +71,11 @@ public final class NotchideAppDelegate: NSObject, NSApplicationDelegate {
             // provider writes it onto the correlated open connection.
             resolveDecision: { [socketProvider] decision in
                 await socketProvider.resolve(decision)
+            },
+            // Voice ACTUATE pushes travel the same provider's duplex actuate wire
+            // (a safe no-op when the target has no live actuate connection).
+            actuate: { [socketProvider] action in
+                await socketProvider.actuate(action)
             }
         )
         self.controller = controller
@@ -82,6 +88,7 @@ public final class NotchideAppDelegate: NSObject, NSApplicationDelegate {
     public func applicationWillTerminate(_ notification: Notification) {
         lanesTask?.cancel(); lanesTask = nil
         eventsTask?.cancel(); eventsTask = nil
+        hostLauncher?.stop()
         controller?.teardown()
         socketProvider?.stop()
     }
@@ -114,9 +121,14 @@ public final class NotchideAppDelegate: NSObject, NSApplicationDelegate {
         Task {
             await registry.register(socketProvider)
             await registry.loadManifests(from: providersDir)
-            for descriptor in await registry.descriptors() {
+            let descriptors = await registry.descriptors()
+            for descriptor in descriptors {
                 await store.register(descriptor.id, decisionCapability: descriptor.decisionCapability)
             }
+            // Providers that advertise `.actuate` can receive server-pushed
+            // prompt/interrupt frames (HOST mode); the rest use the attach path.
+            let actuatable = Set(descriptors.filter { $0.capabilities.contains(.actuate) }.map(\.id))
+            controller.setActuatableProviders(actuatable)
         }
 
         do {
@@ -126,6 +138,12 @@ public final class NotchideAppDelegate: NSObject, NSApplicationDelegate {
             NSLog("notchide: failed to start socket provider: \(error)")
             return
         }
+
+        // Spawn the HOST sidecar now the socket exists. A missing node/sidecar is
+        // a clear logged failure state, never a crash — the app runs without it.
+        let hostLauncher = HostSessionLauncher(socketPath: socketProvider.socketPath)
+        self.hostLauncher = hostLauncher
+        hostLauncher.start()
 
         // The single consumer of the provider's event stream: update lanes/glyphs
         // (the store broadcast drives the cockpit via `observeLanes`) and route

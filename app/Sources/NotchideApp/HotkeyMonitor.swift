@@ -25,6 +25,9 @@ public final class HotkeyMonitor {
 
     public var onSummon: (() -> Void)?
     public var onEscape: (() -> Void)?
+    /// Return / Enter while notchide is frontmost (drives "send now" for the voice
+    /// review HUD). Local-only, so it never hijacks Return in other apps.
+    public var onReturn: (() -> Void)?
 
     private var globalMonitor: Any?
     private var localMonitor: Any?
@@ -73,6 +76,8 @@ public final class HotkeyMonitor {
             onSummon?()
         } else if allowEscape, event.keyCode == 53 { // ESC
             onEscape?()
+        } else if allowEscape, mods.isEmpty, event.keyCode == 36 || event.keyCode == 76 { // Return / keypad Enter
+            onReturn?()
         }
     }
 }

@@ -29,6 +29,15 @@ public final class NotchController {
     /// Hands a resolved decision back to the owning provider (which writes the
     /// frame onto the correlated open connection). Replaces the old DecisionBroker.
     private let resolveDecision: @Sendable (AgentDecision) async -> Void
+    /// Pushes a voice-driven ACTUATE action to the owning provider (host mode).
+    private let actuate: @Sendable (AgentAction) async -> Void
+    /// The attach fallback for non-host (hook-adapter) sessions.
+    private let attachActuator: AttachActuator
+
+    /// Push-to-talk (Control+Option hold) summon monitor.
+    private var pttMonitor: PTTMonitor?
+    /// The voice-drive coordinator (state machine + mic + actuation routing).
+    private var voice: VoiceCoordinator?
 
     /// The DynamicNotchKit panel. `.auto` style resolves to a real notch on
     /// notched Macs and to the first-class floating pill everywhere else.
@@ -85,7 +94,9 @@ public final class NotchController {
         diffProvider: GitDiffProvider,
         terminalJumper: TerminalJumper,
         remembered: RememberedStore,
-        resolveDecision: @escaping @Sendable (AgentDecision) async -> Void
+        resolveDecision: @escaping @Sendable (AgentDecision) async -> Void,
+        actuate: @escaping @Sendable (AgentAction) async -> Void = { _ in },
+        attachActuator: AttachActuator = AttachActuator()
     ) {
         self.model = model
         self.suppressor = suppressor
@@ -94,6 +105,14 @@ public final class NotchController {
         self.terminalJumper = terminalJumper
         self.remembered = remembered
         self.resolveDecision = resolveDecision
+        self.actuate = actuate
+        self.attachActuator = attachActuator
+    }
+
+    /// Records which providers can receive server-pushed actuate frames (HOST
+    /// mode). Sessions from any other provider fall back to the attach path.
+    public func setActuatableProviders(_ providers: Set<ProviderID>) {
+        voice?.actuatableProviders = providers
     }
 
     // MARK: Lifecycle
@@ -111,11 +130,76 @@ public final class NotchController {
         wireModelCallbacks()
         observeHover()
 
+        // Voice drive: the coordinator owns the state machine + mic; this
+        // controller only lends it the panel-motion + most-urgent-lane hooks.
+        let voice = VoiceCoordinator(
+            model: model,
+            actuate: actuate,
+            attachActuator: attachActuator,
+            makeProvider: { Self.makeVoiceProvider() },
+            mostUrgentSession: { [weak self] in self?.mostUrgentLane()?.id },
+            expandPanel: { [weak self] in await self?.expandForVoice() },
+            settlePanel: { [weak self] in await self?.settleAfterVoice() }
+        )
+        self.voice = voice
+
+        let ptt = PTTMonitor()
+        ptt.onPress = { [weak self] in self?.voice?.pttPressed() }
+        ptt.onRelease = { [weak self] in self?.voice?.pttReleased() }
+        ptt.onCancel = { [weak self] in self?.voice?.pttCancelled() }
+        ptt.start()
+        self.pttMonitor = ptt
+
         let hotkey = HotkeyMonitor()
         hotkey.onSummon = { [weak self] in self?.summon() }
-        hotkey.onEscape = { [weak self] in Task { await self?.collapse() } }
+        hotkey.onEscape = { [weak self] in self?.handleEscape() }
+        hotkey.onReturn = { [weak self] in self?.handleReturn() }
         hotkey.start()
         self.hotkey = hotkey
+    }
+
+    /// Builds the best available voice provider: the on-device SpeechAnalyzer on
+    /// macOS 26+, else the (stubbed) WhisperKit fallback.
+    private static func makeVoiceProvider() -> VoiceProvider {
+        if #available(macOS 26.0, *) {
+            return SpeechTranscriberVoiceProvider()
+        } else {
+            return WhisperKitVoiceProvider()
+        }
+    }
+
+    /// ESC: cancel/edit an active voice session first; otherwise furl the console.
+    private func handleEscape() {
+        if model.voiceState.isActive {
+            voice?.escapePressed()
+        } else {
+            Task { await collapse() }
+        }
+    }
+
+    /// Return: send the reviewed voice transcript now, when one is on screen.
+    private func handleReturn() {
+        guard model.voiceState.isActive else { return }
+        voice?.returnPressed()
+    }
+
+    /// Grow the notch to host the voice HUD without arming the idle auto-collapse
+    /// (a voice session is bounded by its own caps).
+    func expandForVoice() async {
+        autoCollapseTask?.cancel()
+        hoverIntentTask?.cancel()
+        presentation = .expanded
+        await notch?.expand()
+    }
+
+    /// Restore the panel after a voice session ends: keep the console if a review
+    /// is on screen, else settle to the cockpit / hidden.
+    func settleAfterVoice() async {
+        if model.review != nil {
+            await expand()
+        } else {
+            await settle()
+        }
     }
 
     /// Cancels every long-lived task and monitor. Called on app termination so
@@ -128,6 +212,10 @@ public final class NotchController {
         gateExpiryTasks.removeAll()
         hotkey?.stop()
         hotkey = nil
+        pttMonitor?.stop()
+        pttMonitor = nil
+        voice?.teardown()
+        voice = nil
     }
 
     // MARK: Ingest-driven presentation
@@ -152,6 +240,9 @@ public final class NotchController {
     /// Notification) stay passive: they pulse the pill, never auto-expand.
     public func consider(event: AgentEvent, capability: DecisionCapability) async {
         latestEvents[event.sessionKey] = event
+        // Let the voice coordinator clear its in-flight barge-in latch when the
+        // target session stops working on a voice prompt.
+        voice?.noteEvent(event)
 
         let isGate = event.kind == .needsDecision
             && capability == .blocking

@@ -68,6 +68,14 @@ targets:
         # notchide draws above fullscreen apps; the notarized .dmg build enables
         # the hardened runtime. Private-framework (SkyLight/CGSSpace) entitlements
         # are a later milestone (see docs/DESIGN.md §10).
+        #
+        # Voice drive needs the microphone under the hardened runtime, so the
+        # signed build MUST carry the audio-input entitlement:
+        #   com.apple.security.device.audio-input = YES
+        # Add it to the target's .entitlements (alongside NSMicrophoneUsageDescription
+        # / NSSpeechRecognitionUsageDescription in Info.plist). Push-to-talk's
+        # CGEventTap additionally relies on the user granting Accessibility at
+        # runtime (AXIsProcessTrusted), which is not an entitlement.
     dependencies:
       - target: NotchideApp
 

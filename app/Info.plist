@@ -44,5 +44,14 @@
          usage string below is retained for any future scripted-activation path. -->
     <key>NSAppleEventsUsageDescription</key>
     <string>notchide can activate your agent's terminal (Terminal, iTerm2, Ghostty, …) so you can jump to it from the review console.</string>
+
+    <!-- Voice drive: push-to-talk (Control+Option) captures the microphone and
+         runs on-device speech recognition (SpeechAnalyzer on macOS 26, else the
+         WhisperKit fallback) to dictate prompts and gate verdicts. Both strings
+         are shown by the system on the first authorization prompt. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>notchide uses the microphone for push-to-talk voice control — dictating prompts and approve/deny verdicts to your agent sessions.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>notchide transcribes your push-to-talk speech on-device to drive your agent sessions by voice.</string>
 </dict>
 </plist>

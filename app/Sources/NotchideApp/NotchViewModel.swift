@@ -82,6 +82,30 @@ public struct ReviewContext: Identifiable, Equatable {
     }
 }
 
+/// The on-screen state of the voice HUD, mirrored from `VoiceController.VoiceState`
+/// but flattened for the view layer (carrying the error message inline).
+///
+/// This is the app-side presentation enum; the pure state machine lives in the
+/// core `VoiceController`. `NotchController` maps one onto the other.
+public enum VoiceHUDState: Equatable {
+    /// The HUD is not on screen.
+    case inactive
+    /// Push-to-talk is engaged and capturing (or arming). Shows the waveform orb,
+    /// the live partial transcript, and the silence meter.
+    case listening
+    /// PTT released; the solidified transcript sits in the editable grace window
+    /// before it auto-sends.
+    case review
+    /// A cap fired (or a provider failed) before anything could be sent. Quiet,
+    /// auto-dismissing.
+    case error(String)
+
+    /// Whether the HUD should be shown at all.
+    public var isActive: Bool { self != .inactive }
+    /// Whether the HUD is actively capturing (drives the orb animation).
+    public var isListening: Bool { self == .listening }
+}
+
 /// The single `@MainActor` source of truth the SwiftUI views observe.
 ///
 /// `NotchController` owns this and pushes lane snapshots and review payloads into
@@ -104,6 +128,37 @@ public final class NotchViewModel: ObservableObject {
     @Published public var muted: Bool = MuteSettings.isMuted {
         didSet { MuteSettings.set(muted) }
     }
+
+    // MARK: Voice HUD
+
+    /// The current voice HUD state. `.inactive` hides the overlay entirely.
+    @Published public var voiceState: VoiceHUDState = .inactive
+    /// The live (volatile-or-final) transcript surfaced under the orb / in the
+    /// review editor. Bound two-way while editing so the user can correct it.
+    @Published public var voiceText: String = ""
+    /// A short label for the target session the utterance is bound to (the chip).
+    @Published public var voiceTargetLabel: String?
+    /// The silence-while-listening / grace-until-send meter, `0...1`.
+    @Published public var voiceMeter: Double = 0
+    /// Set in the review window when the user hits Esc to hold the auto-send and
+    /// edit the transcript (freezes the grace timer).
+    @Published public var voiceEditing: Bool = false
+    /// True while in a gate-verdict (`gate-listen`) session rather than a fresh
+    /// ACTUATE prompt — the HUD then reads as "say approve / deny".
+    @Published public var voiceGateMode: Bool = false
+    /// Set when a spoken *approval* was refused because the pending command was
+    /// flagged destructive: voice-approve is disabled and a click/hotkey is
+    /// required (the approved safety rule). Drives the HUD hint.
+    @Published public var voiceApproveDisabled: Bool = false
+
+    /// Send the reviewed transcript immediately (Return), skipping the grace.
+    public var onVoiceSendNow: (() -> Void)?
+    /// Cancel the voice session (Esc while listening) — discards, emits nothing.
+    public var onVoiceCancel: (() -> Void)?
+    /// Hold the auto-send and edit the transcript (Esc while reviewing).
+    public var onVoiceHoldToEdit: (() -> Void)?
+    /// Commit an edit of the pending transcript during the review window.
+    public var onVoiceEdit: ((String) -> Void)?
 
     // Callbacks wired by NotchController. Kept as closures so the views never
     // reach across into the actor/socket machinery directly.
